@@ -24,14 +24,14 @@ class TitleScene:
     def _activate_option(self) -> None:
         choice = self.options[self.selected].lower()
         if choice == "start":
-            from scenes.world_scene import WorldScene
-            self.game.stack.push(WorldScene(self.game))
+            from scenes.cat_cafe_scene import CatCafeScene
+            self.game.stack.push(CatCafeScene(self.game))
         elif choice == "save":
-            self.game.saves.save("slot1", {"room": "room_001"}, {"seen_intro": True})
+            self.game.saves.save("slot1", {"room": "cat_cafe"}, {"seen_intro": True})
         elif choice == "load":
             run, knowledge = self.game.saves.load("slot1")
-            from scenes.world_scene import WorldScene
-            self.game.stack.push(WorldScene(self.game))
+            from scenes.cat_cafe_scene import CatCafeScene
+            self.game.stack.push(CatCafeScene(self.game))
         elif choice == "exit":
             self.game.quit()
 

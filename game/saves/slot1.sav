@@ -1,6 +1,6 @@
 {
   "run": {
-    "room": "room_001"
+    "room": "cat_cafe"
   },
   "knowledge": {
     "seen_intro": true
