@@ -19,10 +19,11 @@ class Player(Character):
                 # 870x1320 image, 3x3 grid with each frame being 290x440
                 self.spritesheet = Spritesheet(sheet_img, frame_width=290, frame_height=440)
                 
-                self.animations["down"] = self._create_animation([0, 1, 2])
-                self.animations["up"] = self._create_animation([3, 4, 5])
-                self.animations["left"] = self._create_animation([6, 7, 8])
-                self.animations["right"] = self._create_animation_mirrored([6, 7, 8])
+                # Animation order: 1-2-1-3 for a nicer ping-pong loop
+                self.animations["down"] = self._create_animation([0, 1, 0, 2])
+                self.animations["up"] = self._create_animation([3, 4, 3, 5])
+                self.animations["left"] = self._create_animation([6, 7, 6, 8])
+                self.animations["right"] = self._create_animation_mirrored([6, 7, 6, 8])
                 
                 self.animation = self.animations["down"]
                 sprite = self.spritesheet.get_frame(0)
