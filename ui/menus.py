@@ -1,0 +1,2 @@
+class Menus:
+    pass

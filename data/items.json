@@ -1,0 +1,6 @@
+{
+  "items": [
+    {"id": "coin", "name": "Coin"},
+    {"id": "ticket", "name": "Arcade Ticket"}
+  ]
+}
