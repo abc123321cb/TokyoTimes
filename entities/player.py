@@ -10,6 +10,8 @@ class Player(Character):
         sprite = None
         self.direction = "down"
         self.animations = {}
+        self.collision_rects = []  # Will be set by scene
+        self.collision_rect = pygame.Rect(0, 0, 50, 40)  # Small hitbox for feet area
         
         if game:
             try:
@@ -72,6 +74,25 @@ class Player(Character):
             self.last_direction = self.direction
             if self.direction in self.animations:
                 self.animation = self.animations[self.direction]
+        
+        # Calculate new position
+        old_x, old_y = self.x, self.y
+        new_x = self.x + self.velocity_x * dt
+        new_y = self.y + self.velocity_y * dt
+        
+        # Check collision if we have collision data
+        if self.collision_rects:
+            from world.collisions import Collisions
+            # Update collision rect to player's feet position
+            self.collision_rect.centerx = int(new_x) + 72  # Center of sprite
+            self.collision_rect.bottom = int(new_y) + 200  # Bottom of sprite
+            
+            valid_x, valid_y = Collisions.get_valid_position(
+                old_x, old_y, new_x, new_y,
+                self.collision_rect, self.collision_rects
+            )
+            self.velocity_x = (valid_x - old_x) / dt if dt > 0 else 0
+            self.velocity_y = (valid_y - old_y) / dt if dt > 0 else 0
         
         super().update(dt)
         if self.animation and self.spritesheet:
