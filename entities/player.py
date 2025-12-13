@@ -1,6 +1,14 @@
 import pygame
 from entities.character import Character
 from entities.components.animation import Spritesheet, Animation
+from entities.player_config import (
+    PLAYER_HITBOX_WIDTH,
+    PLAYER_HITBOX_HEIGHT,
+    PLAYER_HITBOX_OFFSET_CENTERX,
+    PLAYER_HITBOX_OFFSET_BOTTOM,
+    PLAYER_SPEED,
+    PLAYER_SPRITE_SCALE,
+)
 
 class Player(Character):
     def __init__(self, x: float = 0, y: float = 0, game=None):
@@ -11,7 +19,7 @@ class Player(Character):
         self.direction = "down"
         self.animations = {}
         self.collision_rects = []  # Will be set by scene
-        self.collision_rect = pygame.Rect(0, 0, 50, 40)  # Small hitbox for feet area
+        self.collision_rect = pygame.Rect(0, 0, PLAYER_HITBOX_WIDTH, PLAYER_HITBOX_HEIGHT)  # Small hitbox for feet area
         
         if game:
             try:
@@ -33,7 +41,7 @@ class Player(Character):
                 sprite.fill((100, 200, 250))
         
         super().__init__(x, y, sprite)
-        self.speed = 300
+        self.speed = PLAYER_SPEED
         self.last_direction = "down"
 
     def _create_animation(self, frame_indices: list) -> Animation:
@@ -84,14 +92,26 @@ class Player(Character):
         # Check collision if we have collision data
         if self.collision_rects:
             from world.collisions import Collisions
-            # Update collision rect to player's feet position
-            self.collision_rect.centerx = int(new_x) + 72  # Center of sprite
-            self.collision_rect.bottom = int(new_y) + 200  # Bottom of sprite
-            
-            valid_x, valid_y = Collisions.get_valid_position(
-                old_x, old_y, new_x, new_y,
-                self.collision_rect, self.collision_rects
+            # Build old and new collision rects based on sprite movement
+            old_rect = self.collision_rect.copy()
+            old_rect.centerx = int(old_x) + PLAYER_HITBOX_OFFSET_CENTERX
+            old_rect.bottom = int(old_y) + PLAYER_HITBOX_OFFSET_BOTTOM
+
+            new_rect = self.collision_rect.copy()
+            new_rect.centerx = int(new_x) + PLAYER_HITBOX_OFFSET_CENTERX
+            new_rect.bottom = int(new_y) + PLAYER_HITBOX_OFFSET_BOTTOM
+
+            valid_rx, valid_ry = Collisions.get_valid_rect_position(
+                old_rect, new_rect, self.collision_rects
             )
+
+            # Derive valid sprite top-left from rect using offsets
+            # Convert rect top-left back to sprite top-left
+            # sprite_x = rect_x - offset_centerx + rect_width/2
+            valid_x = valid_rx - PLAYER_HITBOX_OFFSET_CENTERX + (self.collision_rect.width // 2)
+            # sprite_y = rect_y + rect_height - offset_bottom
+            valid_y = valid_ry + self.collision_rect.height - PLAYER_HITBOX_OFFSET_BOTTOM
+
             self.velocity_x = (valid_x - old_x) / dt if dt > 0 else 0
             self.velocity_y = (valid_y - old_y) / dt if dt > 0 else 0
         
@@ -106,11 +126,14 @@ class Player(Character):
             if hasattr(self.animation, 'mirrored') and self.animation.mirrored:
                 self.sprite = pygame.transform.flip(self.sprite, True, False)
             
-            # Scale to 50%
+            # Scale sprite
             if self.sprite:
-                new_width = int(self.sprite.get_width() * 0.5)
-                new_height = int(self.sprite.get_height() * 0.5)
+                new_width = int(self.sprite.get_width() * PLAYER_SPRITE_SCALE)
+                new_height = int(self.sprite.get_height() * PLAYER_SPRITE_SCALE)
                 self.sprite = pygame.transform.scale(self.sprite, (new_width, new_height))
+                # Update the live collision rect to the resolved coordinates for debug drawing
+                self.collision_rect.x = valid_rx
+                self.collision_rect.y = valid_ry
 
     def draw(self, surface: pygame.Surface) -> None:
         if self.sprite:
