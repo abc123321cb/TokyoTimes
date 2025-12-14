@@ -2,6 +2,10 @@ import pygame
 from typing import Any
 from core.scene import Scene
 
+# Import scenes to register them
+from scenes.cat_cafe_scene import CatCafeScene
+from scenes.cat_cafe_kitchen_scene import CatCafeKitchenScene
+
 class TitleScene:
     def __init__(self, game: Any):
         self.game = game
@@ -40,13 +44,11 @@ class TitleScene:
     def _activate_option(self) -> None:
         choice = self.options[self.selected].lower()
         if choice == "start":
-            from scenes.cat_cafe_scene import CatCafeScene
             self.game.stack.push(CatCafeScene(self.game))
         elif choice == "save":
             self.game.saves.save("slot1", {"room": "cat_cafe"}, {"seen_intro": True})
         elif choice == "load":
             run, knowledge = self.game.saves.load("slot1")
-            from scenes.cat_cafe_scene import CatCafeScene
             self.game.stack.push(CatCafeScene(self.game))
         elif choice == "exit":
             self.game.quit()
