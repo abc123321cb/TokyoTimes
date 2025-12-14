@@ -22,6 +22,8 @@ class Player(Character):
         self.direction = "down"
         self.animations = {}
         self.collision_rects = []  # Will be set by scene
+        self.props = []  # Scene props for collision/interact
+        self.interact_prop = None  # Prop currently interactable under hitbox
         self.props = []  # List of props in the scene (set by scene)
         
         # Use custom values or defaults
@@ -79,7 +81,10 @@ class Player(Character):
     
     def _rect_collides_with_props(self, rect: pygame.Rect) -> bool:
         """Check if rect collides with any prop mask.
-        Black pixels = walkable, transparent = blocked, other colors = blocked.
+        Mask semantics:
+        - black: walkable
+        - white: interactable (walkable, but marks current interactable)
+        - transparent (alpha==0) or other colors: blocked
         """
         for prop in self.props:
             if not hasattr(prop, 'mask') or not prop.mask or not hasattr(prop, 'x') or not hasattr(prop, 'y'):
@@ -108,21 +113,30 @@ class Player(Character):
                 # Check if point is within mask bounds
                 if 0 <= local_x < prop.mask.get_width() and 0 <= local_y < prop.mask.get_height():
                     try:
-                        # Get pixel color at this position
                         color = prop.mask.get_at((local_x, local_y))
-                        
-                        # Check if transparent (alpha = 0)
-                        if len(color) >= 4 and color[3] == 0:
-                            # Transparent - collision!
+                        r = color[0] if len(color) >= 1 else 0
+                        g = color[1] if len(color) >= 2 else 0
+                        b = color[2] if len(color) >= 3 else 0
+                        a = color[3] if len(color) >= 4 else 255
+
+                        # Transparent blocks movement
+                        if a == 0:
                             return True
-                        elif len(color) >= 3:
-                            # Check if it's black (walkable): (0, 0, 0) or close to it
-                            r, g, b = color[0], color[1], color[2]
-                            is_black = r < 50 and g < 50 and b < 50  # Allow slight variance
-                            
-                            if not is_black and color[3] > 0 if len(color) >= 4 else True:
-                                # Not black and not transparent - collision!
-                                return True
+
+                        is_black = r < 50 and g < 50 and b < 50
+                        is_white = r > 200 and g > 200 and b > 200
+
+                        if is_white:
+                            # Interactable area - do not block, but mark
+                            self.interact_prop = prop
+                            continue
+
+                        if is_black:
+                            # Walkable
+                            continue
+
+                        # Any other colored pixel blocks
+                        return True
                     except Exception as e:
                         print(f"Error checking prop collision: {e}")
                         continue
@@ -130,6 +144,8 @@ class Player(Character):
         return False
 
     def update(self, dt: float) -> None:
+        # Reset interactable each frame
+        self.interact_prop = None
         keys = pygame.key.get_pressed()
         self.velocity_x = 0
         self.velocity_y = 0

@@ -52,3 +52,13 @@ class Prop:
             surface.blit(self.sprite, (screen_x, screen_y))
         else:
             pygame.draw.rect(surface, (120, 120, 120), self.rect)
+
+    def depth(self) -> float:
+        """Return depth (y) used for sorting. Uses visible sprite bounds to ignore transparent extensions."""
+        if self.sprite:
+            # bounding_rect is relative to surface; bottom gives visible height ignoring full transparency
+            bbox = self.sprite.get_bounding_rect(min_alpha=1)
+            return self.y + bbox.bottom
+        elif self.rect:
+            return self.rect.bottom
+        return self.y

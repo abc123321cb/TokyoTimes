@@ -183,16 +183,22 @@ class MaskedScene:
         # Objects further down (higher Y) should be drawn last so they appear on top
         drawables = []
         
-        # Add player
-        drawables.append(('player', self.player, self.player.y + self.player.sprite.get_height()))
+        # Add player, depth based on feet (collision rect bottom)
+        player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
+        drawables.append(('player', self.player, player_depth))
         
         # Add props
         if hasattr(self, 'props'):
             for prop in self.props:
-                if hasattr(prop, 'mask') and prop.mask:
-                    prop_bottom = prop.y + prop.mask.get_height()
+                # Prefer prop.depth() if available to ignore transparent interaction extensions
+                if hasattr(prop, 'depth') and callable(prop.depth):
+                    prop_bottom = prop.depth()
+                elif hasattr(prop, 'sprite') and prop.sprite:
+                    prop_bottom = prop.y + prop.sprite.get_height()
                 elif hasattr(prop, 'rect'):
                     prop_bottom = prop.rect.bottom
+                elif hasattr(prop, 'mask') and prop.mask:
+                    prop_bottom = prop.y + prop.mask.get_height()
                 else:
                     prop_bottom = prop.y
                 drawables.append(('prop', prop, prop_bottom))
