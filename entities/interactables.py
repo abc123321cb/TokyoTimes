@@ -1,5 +1,6 @@
 import pygame
 
+
 class Interactable:
     def __init__(self, rect):
         self.rect = rect
@@ -8,78 +9,36 @@ class Interactable:
         pass
 
 
-class ArcadeCabinet:
-    """Arcade cabinet prop that can be placed in a scene."""
-    def __init__(self, x: float, y: float, game=None):
-        self.x = x
-        self.y = y
-        self.game = game
-        self.sprite = None
-        self.mask = None  # Collision mask for the prop
-        
-        # Load arcade cabinet image
-        if game:
-            try:
-                self.sprite = game.assets.image("props/arcade_cabinet_spaceship.png")
-            except Exception as e:
-                print(f"Warning: Could not load arcade cabinet: {e}")
-                # Create placeholder
-                self.sprite = pygame.Surface((128, 192))
-                self.sprite.fill((100, 100, 100))
-            
-            # Load arcade cabinet mask
-            try:
-                self.mask = game.assets.image("props/arcade_cabinet_spaceship_mask.png")
-            except Exception as e:
-                print(f"Warning: Could not load arcade cabinet mask: {e}")
-        
-        if self.sprite:
-            self.rect = self.sprite.get_rect(topleft=(x, y))
-        else:
-            self.rect = pygame.Rect(x, y, 128, 192)
-    
-    def update(self, dt: float) -> None:
-        """Update arcade cabinet (position, animation, etc)."""
-        pass
-    
-    def draw(self, surface: pygame.Surface, camera=None) -> None:
-        """Draw arcade cabinet to surface."""
-        if self.sprite:
-            if camera:
-                screen_x, screen_y = camera.apply(self.x, self.y)
-            else:
-                screen_x, screen_y = self.x, self.y
-            surface.blit(self.sprite, (screen_x, screen_y))
-        else:
-            pygame.draw.rect(surface, (100, 100, 100), self.rect)
+class Prop:
+    """Generic prop with sprite + mask.
+    Black pixels in mask = walkable; transparent/other = blocked (collision handled in player).
+    """
 
-
-class ArcadeCabinetBlocks:
-    """Variant arcade cabinet (blocks theme) with its own sprite and mask."""
-    def __init__(self, x: float, y: float, game=None):
+    def __init__(self, x: float, y: float, sprite_path: str, mask_path: str = None, game=None):
         self.x = x
         self.y = y
         self.game = game
         self.sprite = None
         self.mask = None
 
-        if game:
+        if game and sprite_path:
             try:
-                self.sprite = game.assets.image("props/arcade_cabinet_blocks.png")
+                self.sprite = game.assets.image(sprite_path)
             except Exception as e:
-                print(f"Warning: Could not load arcade cabinet blocks sprite: {e}")
-                self.sprite = pygame.Surface((128, 192))
+                print(f"Warning: Could not load prop sprite {sprite_path}: {e}")
+                self.sprite = pygame.Surface((64, 64))
                 self.sprite.fill((120, 120, 120))
 
+        if game and mask_path:
             try:
-                self.mask = game.assets.image("props/arcade_cabinet_blocks_mask.png")
+                self.mask = game.assets.image(mask_path)
             except Exception as e:
-                print(f"Warning: Could not load arcade cabinet blocks mask: {e}")
+                print(f"Warning: Could not load prop mask {mask_path}: {e}")
 
         if self.sprite:
             self.rect = self.sprite.get_rect(topleft=(x, y))
         else:
-            self.rect = pygame.Rect(x, y, 128, 192)
+            self.rect = pygame.Rect(x, y, 64, 64)
 
     def update(self, dt: float) -> None:
         pass
