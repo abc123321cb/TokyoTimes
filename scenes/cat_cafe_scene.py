@@ -46,9 +46,7 @@ class CatCafeScene(MaskedScene):
     
     def draw(self, surface: pygame.Surface) -> None:
         super().draw(surface)
-        # Draw props after base scene with camera transformation
-        for prop in self.props:
-            prop.draw(surface, camera=self.camera)
+        # Base scene now handles depth-sorted drawing of player and props
         surface.blit(self.font.render("Cat Cafe (ESC for inventory)", True, (255, 255, 255)), (8, 8))
 
 

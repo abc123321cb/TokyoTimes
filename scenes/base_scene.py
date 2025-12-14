@@ -179,31 +179,56 @@ class MaskedScene:
                     label = self.font.render(f"P{portal_id}", True, (0, 128, 255))
                     surface.blit(label, (px + 5, py + 5))
         
-        # Draw player
-        player_screen_x, player_screen_y = self.camera.apply(self.player.x, self.player.y)
-        temp_surface = pygame.Surface((self.player.sprite.get_width(), self.player.sprite.get_height()), pygame.SRCALPHA)
-        self.player.sprite and temp_surface.blit(self.player.sprite, (0, 0))
-        surface.blit(temp_surface, (player_screen_x, player_screen_y))
+        # Collect and sort drawable objects by Y position (depth sorting)
+        # Objects further down (higher Y) should be drawn last so they appear on top
+        drawables = []
         
-        # Draw hitbox (debug)
-        if DEBUG_DRAW and hasattr(self.player, 'collision_rect'):
-            coll_x, coll_y = self.camera.apply(self.player.collision_rect.x, self.player.collision_rect.y)
-            hb_surf = pygame.Surface((self.player.collision_rect.width, self.player.collision_rect.height), pygame.SRCALPHA)
-            hb_surf.fill((0, 255, 0, 80))
-            surface.blit(hb_surf, (coll_x, coll_y))
-            pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, self.player.collision_rect.width, self.player.collision_rect.height), 2)
+        # Add player
+        drawables.append(('player', self.player, self.player.y + self.player.sprite.get_height()))
         
-        # Draw prop bounding boxes (debug)
-        if DEBUG_DRAW and hasattr(self, 'props'):
+        # Add props
+        if hasattr(self, 'props'):
             for prop in self.props:
                 if hasattr(prop, 'mask') and prop.mask:
-                    prop_x, prop_y = self.camera.apply(prop.x, prop.y)
-                    mask_width = prop.mask.get_width()
-                    mask_height = prop.mask.get_height()
-                    pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, mask_width, mask_height), 2)
+                    prop_bottom = prop.y + prop.mask.get_height()
                 elif hasattr(prop, 'rect'):
-                    prop_x, prop_y = self.camera.apply(prop.rect.x, prop.rect.y)
-                    pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, prop.rect.width, prop.rect.height), 2)
+                    prop_bottom = prop.rect.bottom
+                else:
+                    prop_bottom = prop.y
+                drawables.append(('prop', prop, prop_bottom))
+        
+        # Sort by Y position (bottom of sprite)
+        drawables.sort(key=lambda x: x[2])
+        
+        # Draw in sorted order
+        for obj_type, obj, _ in drawables:
+            if obj_type == 'player':
+                player_screen_x, player_screen_y = self.camera.apply(obj.x, obj.y)
+                temp_surface = pygame.Surface((obj.sprite.get_width(), obj.sprite.get_height()), pygame.SRCALPHA)
+                obj.sprite and temp_surface.blit(obj.sprite, (0, 0))
+                surface.blit(temp_surface, (player_screen_x, player_screen_y))
+                
+                # Draw hitbox (debug)
+                if DEBUG_DRAW and hasattr(obj, 'collision_rect'):
+                    coll_x, coll_y = self.camera.apply(obj.collision_rect.x, obj.collision_rect.y)
+                    hb_surf = pygame.Surface((obj.collision_rect.width, obj.collision_rect.height), pygame.SRCALPHA)
+                    hb_surf.fill((0, 255, 0, 80))
+                    surface.blit(hb_surf, (coll_x, coll_y))
+                    pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
+            
+            elif obj_type == 'prop':
+                obj.draw(surface, camera=self.camera)
+                
+                # Draw prop bounding box (debug)
+                if DEBUG_DRAW:
+                    if hasattr(obj, 'mask') and obj.mask:
+                        prop_x, prop_y = self.camera.apply(obj.x, obj.y)
+                        mask_width = obj.mask.get_width()
+                        mask_height = obj.mask.get_height()
+                        pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, mask_width, mask_height), 2)
+                    elif hasattr(obj, 'rect'):
+                        prop_x, prop_y = self.camera.apply(obj.rect.x, obj.rect.y)
+                        pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, obj.rect.width, obj.rect.height), 2)
     
     def _enter_portal(self, portal_id: int) -> None:
         """Handle portal transition using scene registry."""
