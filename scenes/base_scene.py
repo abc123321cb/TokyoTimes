@@ -1,5 +1,6 @@
 """Base scene class with automatic mask-based collision support."""
 import pygame
+import random
 from typing import Any, Optional
 from entities.player import Player
 from world.camera import Camera
@@ -13,6 +14,10 @@ from entities.player_config import (
     PLAYER_SPRITE_SCALE,
     PLAYER_SPEED,
 )
+from scenes.minigames.blocks import BlocksState
+from scenes.minigames.asteroids import AsteroidsState
+
+
 
 
 # Debug flag - set to False to hide collision/portal debug visuals
@@ -48,6 +53,8 @@ class MaskedScene:
     
     def __init__(self, game: Any, spawn: tuple = None):
         self.game = game
+        self.active_modal = None  # Holds modal state when an arcade is open
+        self.current_interact_prop = None  # Cached interactable prop for this frame
         
         # Load background
         try:
@@ -145,14 +152,90 @@ class MaskedScene:
             parts = background_path.rsplit('.', 1)
             return f"{parts[0]}_mask.png"
         return f"{background_path}_mask.png"
+
+    def _open_arcade_modal(self, prop: Any) -> None:
+        """Open a simple modal overlay for arcade interaction."""
+        # If this is the blocks arcade, start tetris
+        if getattr(prop, 'name', None) == 'arcade_blocks':
+            self.active_modal = {
+                "type": "blocks",
+                "prop": prop,
+                "state": BlocksState(),
+            }
+        elif getattr(prop, 'name', None) == 'arcade_spaceship':
+            self.active_modal = {
+                "type": "asteroids",
+                "prop": prop,
+                "state": AsteroidsState(),
+            }
+        else:
+            self.active_modal = {"type": "generic", "prop": prop}
     
     def handle_event(self, event: pygame.event.Event) -> None:
+        # If a modal is open, route inputs or close
+        if self.active_modal:
+            if isinstance(self.active_modal, dict):
+                mtype = self.active_modal.get("type")
+                state = self.active_modal.get("state")
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.active_modal = None
+                    return
+                if mtype == "blocks" and state:
+                    if event.type == pygame.KEYDOWN:
+                        state.handle_key(event.key)
+                        return
+                elif mtype == "asteroids" and state:
+                    if event.type == pygame.KEYDOWN:
+                        state.handle_key(event.key)
+                        return
+                # Close generic modal on click
+                if mtype == "generic" and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    self.active_modal = None
+                    return
+            return
+
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
             from scenes.inventory_scene import InventoryScene
             self.game.stack.push(InventoryScene(self.game))
+
+        # Interact with prop via Enter
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if self.current_interact_prop:
+                self._open_arcade_modal(self.current_interact_prop)
+                return
+
+        # Interact with prop via mouse click (left)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.current_interact_prop:
+            mx, my = event.pos
+            world_x, world_y = mx + self.camera.x, my + self.camera.y
+
+            prop = self.current_interact_prop
+            if hasattr(prop, 'sprite') and prop.sprite:
+                bbox = prop.sprite.get_bounding_rect(min_alpha=1)
+                prop_rect = pygame.Rect(prop.x + bbox.x, prop.y + bbox.y, bbox.width, bbox.height)
+            elif hasattr(prop, 'rect'):
+                prop_rect = prop.rect
+            else:
+                prop_rect = pygame.Rect(prop.x, prop.y, 1, 1)
+
+            if prop_rect.collidepoint(world_x, world_y):
+                self._open_arcade_modal(prop)
+                return
     
     def update(self, dt: float) -> None:
+        # Freeze game world updates while modal is open; update modal if needed
+        if self.active_modal:
+            if isinstance(self.active_modal, dict):
+                mtype = self.active_modal.get("type")
+                state = self.active_modal.get("state")
+                if mtype in ("blocks", "asteroids") and state:
+                    state.update(dt)
+            return
+
         self.player.update(dt)
+        # Cache interactable prop for this frame
+        self.current_interact_prop = getattr(self.player, 'interact_prop', None)
+
         self.camera.follow(self.player.x, self.player.y, self.world_width, self.world_height)
         
         # Check portals
@@ -235,6 +318,31 @@ class MaskedScene:
                     elif hasattr(obj, 'rect'):
                         prop_x, prop_y = self.camera.apply(obj.rect.x, obj.rect.y)
                         pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, obj.rect.width, obj.rect.height), 2)
+
+        # Modal overlay
+        if self.active_modal:
+            overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 180))
+            surface.blit(overlay, (0, 0))
+
+            modal_w, modal_h = int(WINDOW_WIDTH * 0.8), int(WINDOW_HEIGHT * 0.7)
+            modal_x = (WINDOW_WIDTH - modal_w) // 2
+            modal_y = (WINDOW_HEIGHT - modal_h) // 2
+            pygame.draw.rect(surface, (30, 30, 30), (modal_x, modal_y, modal_w, modal_h))
+            pygame.draw.rect(surface, (200, 200, 200), (modal_x, modal_y, modal_w, modal_h), 3)
+
+            if isinstance(self.active_modal, dict):
+                mtype = self.active_modal.get("type")
+                state = self.active_modal.get("state")
+                if mtype == "blocks" and state:
+                    state.draw(surface, modal_x, modal_y, modal_w, modal_h, self.font)
+                elif mtype == "asteroids" and state:
+                    state.draw(surface, modal_x, modal_y, modal_w, modal_h, self.font)
+                else:
+                    title = self.font.render("Arcade", True, (255, 255, 255))
+                    surface.blit(title, (modal_x + 20, modal_y + 20))
+                    hint = self.font.render("(ESC to close)", True, (180, 180, 180))
+                    surface.blit(hint, (modal_x + 20, modal_y + 60))
     
     def _enter_portal(self, portal_id: int) -> None:
         """Handle portal transition using scene registry."""

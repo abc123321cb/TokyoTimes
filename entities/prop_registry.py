@@ -17,4 +17,11 @@ def make_prop(name: str, x: float, y: float, game=None) -> Prop:
     cfg = PROP_PRESETS.get(name)
     if not cfg:
         raise ValueError(f"Unknown prop preset: {name}")
-    return Prop(x=x, y=y, sprite_path=cfg.get("sprite"), mask_path=cfg.get("mask"), game=game)
+    return Prop(
+        x=x,
+        y=y,
+        sprite_path=cfg.get("sprite"),
+        mask_path=cfg.get("mask"),
+        game=game,
+        name=name,
+    )

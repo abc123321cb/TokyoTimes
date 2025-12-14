@@ -14,9 +14,10 @@ class Prop:
     Black pixels in mask = walkable; transparent/other = blocked (collision handled in player).
     """
 
-    def __init__(self, x: float, y: float, sprite_path: str, mask_path: str = None, game=None):
+    def __init__(self, x: float, y: float, sprite_path: str, mask_path: str = None, game=None, name: str = None):
         self.x = x
         self.y = y
+        self.name = name
         self.game = game
         self.sprite = None
         self.mask = None
