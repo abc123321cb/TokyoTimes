@@ -90,6 +90,9 @@ class MaskedScene:
         
         # Camera and player
         self.camera = Camera(WINDOW_WIDTH, WINDOW_HEIGHT)
+        # NPC container
+        if not hasattr(self, 'npcs'):
+            self.npcs = []
         
         # Use scene-specific player config if set, otherwise use defaults
         player_sprite_scale = self.PLAYER_SPRITE_SCALE if self.PLAYER_SPRITE_SCALE is not None else PLAYER_SPRITE_SCALE
@@ -230,9 +233,19 @@ class MaskedScene:
             # Mark the prop as picked up so it doesn't show in the scene
             prop.picked_up = True
             
-            # Track item pickup globally so it doesn't respawn in original scene
-            if hasattr(prop, 'item_id') and prop.item_id:
-                self.game.picked_up_items.add(prop.item_id)
+            # Handle tracking differently for original vs dropped items
+            if getattr(prop, 'is_dropped', False):
+                # This is a dropped item - remove it from dropped_items for this scene
+                if self.scene_name and self.scene_name in self.game.dropped_items:
+                    # Find and remove this item from the dropped_items list
+                    self.game.dropped_items[self.scene_name] = [
+                        d for d in self.game.dropped_items[self.scene_name]
+                        if not (d['x'] == prop.x and d['y'] == prop.y and d['name'] == prop.name)
+                    ]
+            else:
+                # This is an original scene item - track so it doesn't respawn
+                if hasattr(prop, 'item_id') and prop.item_id:
+                    self.game.picked_up_items.add(prop.item_id)
             
             print(f"Picked up: {item_to_add.get('name')}")
         else:
@@ -257,6 +270,7 @@ class MaskedScene:
             # Create the prop at drop position (with unique ID for this dropped instance)
             dropped_prop = make_prop(item_name, drop_x, drop_y, self.game, variant_index=variant_index, scale=scale)
             dropped_prop.picked_up = False
+            dropped_prop.is_dropped = True  # Mark as dropped so we handle it differently when picked up
             
             # Add to scene props
             if hasattr(self, 'props'):
@@ -389,6 +403,12 @@ class MaskedScene:
         player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
         drawables.append(('player', self.player, player_depth))
         
+        # Add NPCs
+        if hasattr(self, 'npcs') and self.npcs:
+            for npc in self.npcs:
+                npc_bottom = npc.y + (npc.sprite.get_height() if npc.sprite else 0)
+                drawables.append(('npc', npc, npc_bottom))
+
         # Add props
         if hasattr(self, 'props'):
             for prop in self.props:
@@ -427,6 +447,13 @@ class MaskedScene:
                     surface.blit(hb_surf, (coll_x, coll_y))
                     pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
             
+            elif obj_type == 'npc':
+                npc_x, npc_y = self.camera.apply(obj.x, obj.y)
+                if obj.sprite:
+                    surface.blit(obj.sprite, (npc_x, npc_y))
+                else:
+                    pygame.draw.rect(surface, (180, 180, 220), (npc_x, npc_y, 40, 60))
+
             elif obj_type == 'prop':
                 obj.draw(surface, camera=self.camera)
                 

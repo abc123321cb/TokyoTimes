@@ -1,6 +1,8 @@
 import pygame
 from entities.character import Character
 from entities.components.animation import Spritesheet, Animation
+from core.sprites import SpriteLoader
+from core.sprite_registry import get_sprite_config
 from entities.components.inventory import Inventory
 from entities.player_config import (
     PLAYER_HITBOX_WIDTH,
@@ -43,19 +45,17 @@ class Player(Character):
         
         if game:
             try:
-                sheet_img = game.assets.image("sprites/girl.png")
-                # 870x1320 image, 3x3 grid with each frame being 290x440
-                self.spritesheet = Spritesheet(sheet_img, frame_width=290, frame_height=440)
-                
+                loader = SpriteLoader(game.assets)
+                girl_cfg = get_sprite_config("player_girl")
+                sheet_img = game.assets.image(girl_cfg["path"]) 
+                self.spritesheet = Spritesheet(sheet_img, frame_width=girl_cfg["frame_width"], frame_height=girl_cfg["frame_height"]) 
                 # Animation order: 1-2-1-3 for a nicer ping-pong loop
                 self.animations["down"] = self._create_animation([0, 1, 0, 2])
                 self.animations["up"] = self._create_animation([3, 4, 3, 5])
                 self.animations["left"] = self._create_animation([6, 7, 6, 8])
                 self.animations["right"] = self._create_animation_mirrored([6, 7, 6, 8])
-                
                 self.animation = self.animations["down"]
                 sprite = self.spritesheet.get_frame(0)
-                
                 # Scale sprite if needed
                 if sprite_scale and sprite_scale != 1.0:
                     new_width = int(sprite.get_width() * sprite_scale)
@@ -89,6 +89,10 @@ class Player(Character):
         - transparent (alpha==0) or other colors: blocked
         """
         for prop in self.props:
+            # Skip picked-up items
+            if getattr(prop, 'picked_up', False):
+                continue
+            
             if not hasattr(prop, 'mask') or not prop.mask or not hasattr(prop, 'x') or not hasattr(prop, 'y'):
                 continue
             

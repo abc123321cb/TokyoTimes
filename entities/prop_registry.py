@@ -1,23 +1,21 @@
 """Central registry for prop presets and helper factory."""
 from entities.interactables import Prop
+from core.sprite_registry import get_sprite_config
 
 # Add new props here; keep sprite/mask paths in one place
 PROP_PRESETS = {
     "arcade_spaceship": {
-        "sprite": "props/arcade_cabinet_spaceship.png",
-        "mask": "props/arcade_cabinet_spaceship_mask.png",
+        "sprite_key": "prop_arcade_spaceship",
         "variants": 1,
         "default_variant": 0,
     },
     "arcade_blocks": {
-        "sprite": "props/arcade_cabinet_blocks.png",
-        "mask": "props/arcade_cabinet_blocks_mask.png",
+        "sprite_key": "prop_arcade_blocks",
         "variants": 1,
         "default_variant": 0,
     },
     "cat_food_dish": {
-        "sprite": "props/cat_food_dish.png",
-        "mask": "props/cat_food_dish_mask.png",
+        "sprite_key": "prop_cat_food_dish",
         "variants": 3,
         "default_variant": 0,
         "scale": 2.0,
@@ -35,6 +33,18 @@ def make_prop(name: str, x: float, y: float, game=None, variant_index: int = Non
     default_scale = cfg.get("scale", 1.0)
     is_item = cfg.get("is_item", False)
     item_data = cfg.get("item_data", {})
+    # Resolve sprite paths from registry
+    sprite_key = cfg.get("sprite_key")
+    sprite_path = None
+    mask_path = None
+    if sprite_key:
+        sprite_cfg = get_sprite_config(sprite_key)
+        sprite_path = sprite_cfg.get("path")
+        mask_path = sprite_cfg.get("mask_path")
+    else:
+        # Backward compatibility
+        sprite_path = cfg.get("sprite")
+        mask_path = cfg.get("mask")
     if variant_index is None:
         variant_index = default_variant
     if scale is None:
@@ -49,8 +59,8 @@ def make_prop(name: str, x: float, y: float, game=None, variant_index: int = Non
     return Prop(
         x=x,
         y=y,
-        sprite_path=cfg.get("sprite"),
-        mask_path=cfg.get("mask"),
+        sprite_path=sprite_path,
+        mask_path=mask_path,
         game=game,
         name=name,
         variants=variants,

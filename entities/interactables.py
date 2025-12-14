@@ -1,4 +1,5 @@
 import pygame
+from core.sprites import SpriteLoader
 
 
 class Interactable:
@@ -31,6 +32,7 @@ class Prop:
         self.mask = None
         self._mask_sheet = None
 
+        loader = SpriteLoader(game.assets) if game else None
         if game and sprite_path:
             try:
                 self._sheet = game.assets.image(sprite_path)
@@ -56,26 +58,32 @@ class Prop:
     def _rebuild_variant_surface(self):
         if not self._sheet:
             return
-        sheet_w = self._sheet.get_width()
-        sheet_h = self._sheet.get_height()
-        frame_w = sheet_w // self.variants if self.variants > 0 else sheet_w
-        frame_h = sheet_h
+        loader = SpriteLoader(self.game.assets) if self.game else None
         index = max(0, min(self.variant_index, self.variants - 1))
-        src_rect = pygame.Rect(index * frame_w, 0, frame_w, frame_h)
-        # Create a surface for the sprite frame and blit
-        frame = pygame.Surface((frame_w, frame_h), pygame.SRCALPHA)
-        frame.blit(self._sheet, (0, 0), src_rect)
-        self.sprite = frame
+        if loader:
+            self.sprite = loader.slice_variant(self._sheet, self.variants, index)
+        else:
+            sheet_w = self._sheet.get_width()
+            sheet_h = self._sheet.get_height()
+            frame_w = sheet_w // self.variants if self.variants > 0 else sheet_w
+            frame_h = sheet_h
+            src_rect = pygame.Rect(index * frame_w, 0, frame_w, frame_h)
+            frame = pygame.Surface((frame_w, frame_h), pygame.SRCALPHA)
+            frame.blit(self._sheet, (0, 0), src_rect)
+            self.sprite = frame
         # Also slice the mask variant if a mask sheet exists
         if self._mask_sheet:
-            mask_w = self._mask_sheet.get_width()
-            mask_h = self._mask_sheet.get_height()
-            mask_frame_w = mask_w // self.variants if self.variants > 0 else mask_w
-            mask_frame_h = mask_h
-            mask_src_rect = pygame.Rect(index * mask_frame_w, 0, mask_frame_w, mask_frame_h)
-            mask_frame = pygame.Surface((mask_frame_w, mask_frame_h), pygame.SRCALPHA)
-            mask_frame.blit(self._mask_sheet, (0, 0), mask_src_rect)
-            self.mask = mask_frame
+            if loader:
+                self.mask = loader.slice_variant(self._mask_sheet, self.variants, index)
+            else:
+                mask_w = self._mask_sheet.get_width()
+                mask_h = self._mask_sheet.get_height()
+                mask_frame_w = mask_w // self.variants if self.variants > 0 else mask_w
+                mask_frame_h = mask_h
+                mask_src_rect = pygame.Rect(index * mask_frame_w, 0, mask_frame_w, mask_frame_h)
+                mask_frame = pygame.Surface((mask_frame_w, mask_frame_h), pygame.SRCALPHA)
+                mask_frame.blit(self._mask_sheet, (0, 0), mask_src_rect)
+                self.mask = mask_frame
 
     def set_variant(self, index: int):
         """Switch to a different variant sprite and mask."""

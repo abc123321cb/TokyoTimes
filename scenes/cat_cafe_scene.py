@@ -3,6 +3,7 @@ from typing import Any
 from scenes.base_scene import MaskedScene
 from scenes.scene_registry import register_scene
 from entities.prop_registry import make_prop
+from entities.npc import NPC
 
 
 # Portal mapping: portal_id (from white regions in mask) -> scene configuration
@@ -33,6 +34,7 @@ class CatCafeScene(MaskedScene):
     def __init__(self, game: Any, spawn: tuple = None):
         # Initialize props list before calling super().__init__ so player can access it
         self.props = []
+        self.npcs = []
         
         super().__init__(game, spawn)
         
@@ -42,11 +44,15 @@ class CatCafeScene(MaskedScene):
         
         # Create cat_food_dish, but check if it was already picked up globally
         cat_food_dish_id = f"cat_food_dish:{int(self.CAT_FOOD_DISH_POS[0])}:{int(self.CAT_FOOD_DISH_POS[1])}"
+        print(f"Checking if {cat_food_dish_id} is in picked_up_items: {cat_food_dish_id in game.picked_up_items}")
+        print(f"Current picked_up_items: {game.picked_up_items}")
         if cat_food_dish_id not in game.picked_up_items:
             self.cat_food_dish = make_prop("cat_food_dish", self.CAT_FOOD_DISH_POS[0], self.CAT_FOOD_DISH_POS[1], game, scale=2.0)
+            print(f"Created cat_food_dish with item_id: {self.cat_food_dish.item_id}")
             self.props = [self.arcade_cabinet, self.arcade_cabinet_blocks, self.cat_food_dish]
         else:
             # Item was picked up, don't spawn it
+            print(f"Skipping cat_food_dish because it was picked up")
             self.props = [self.arcade_cabinet, self.arcade_cabinet_blocks]
         
         # Spawn any items that were dropped in this scene
@@ -60,8 +66,14 @@ class CatCafeScene(MaskedScene):
                     variant_index=dropped_item.get('variant_index', 0),
                     scale=dropped_item.get('scale', None)
                 )
+                dropped_prop.is_dropped = True  # Mark as dropped
                 self.props.append(dropped_prop)
         
+        # Place Henry NPC in the scene (near the counter)
+        henry_pos = (680, 500)
+        henry = NPC(henry_pos[0], henry_pos[1], game=game, sprite_scale=self.PLAYER_SPRITE_SCALE or 1.0)
+        self.npcs.append(henry)
+
         # Update player's prop reference
         self.player.props = self.props
     

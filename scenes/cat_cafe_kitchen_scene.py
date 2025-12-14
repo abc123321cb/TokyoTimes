@@ -37,6 +37,7 @@ class CatCafeKitchenScene(MaskedScene):
                     variant_index=dropped_item.get('variant_index', 0),
                     scale=dropped_item.get('scale', None)
                 )
+                dropped_prop.is_dropped = True  # Mark as dropped
                 self.props.append(dropped_prop)
         
         # Update player's prop reference if player exists
