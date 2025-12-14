@@ -306,9 +306,11 @@ class Player(Character):
         
         super().update(dt)
         if self.animation and self.spritesheet:
-            # Only animate when moving
+            # Animate only when moving; idle shows first variant
             if moving:
                 self.animation.update(dt)
+            else:
+                self.animation.current_frame = 0
             # Get current frame (with scaling applied)
             self.sprite = self.animation.get_current_frame()
 

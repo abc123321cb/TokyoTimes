@@ -44,15 +44,11 @@ class CatCafeScene(MaskedScene):
         
         # Create cat_food_dish, but check if it was already picked up globally
         cat_food_dish_id = f"cat_food_dish:{int(self.CAT_FOOD_DISH_POS[0])}:{int(self.CAT_FOOD_DISH_POS[1])}"
-        print(f"Checking if {cat_food_dish_id} is in picked_up_items: {cat_food_dish_id in game.picked_up_items}")
-        print(f"Current picked_up_items: {game.picked_up_items}")
         if cat_food_dish_id not in game.picked_up_items:
             self.cat_food_dish = make_prop("cat_food_dish", self.CAT_FOOD_DISH_POS[0], self.CAT_FOOD_DISH_POS[1], game, scale=2.0)
-            print(f"Created cat_food_dish with item_id: {self.cat_food_dish.item_id}")
             self.props = [self.arcade_cabinet, self.arcade_cabinet_blocks, self.cat_food_dish]
         else:
             # Item was picked up, don't spawn it
-            print(f"Skipping cat_food_dish because it was picked up")
             self.props = [self.arcade_cabinet, self.arcade_cabinet_blocks]
         
         # Spawn any items that were dropped in this scene
@@ -73,6 +69,12 @@ class CatCafeScene(MaskedScene):
         henry_pos = (680, 500)
         henry = NPC(henry_pos[0], henry_pos[1], game=game, sprite_scale=self.PLAYER_SPRITE_SCALE or 1.0)
         self.npcs.append(henry)
+        # Ask Henry to walk to a cozy corner
+        try:
+            goal = (1200, 470)
+            henry.set_destination(goal, self)
+        except Exception as e:
+            print("Henry destination setup failed:", e)
 
         # Update player's prop reference
         self.player.props = self.props

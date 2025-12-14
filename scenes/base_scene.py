@@ -366,6 +366,13 @@ class MaskedScene:
             return
 
         self.player.update(dt)
+        # Update NPCs
+        if hasattr(self, 'npcs') and self.npcs:
+            for npc in self.npcs:
+                try:
+                    npc.update(dt)
+                except Exception as e:
+                    print("NPC update error:", e)
         # Cache interactable prop for this frame
         self.current_interact_prop = getattr(self.player, 'interact_prop', None)
 
