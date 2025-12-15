@@ -24,17 +24,25 @@ PROP_PRESETS = {
     },
 }
 
-def make_prop(name: str, x: float, y: float, game=None, variant_index: int = None, scale: float = None, item_id: str = None) -> Prop:
+def make_prop(name: str, x: float, y: float, game=None, variant_index: int = None, scale: float = None, item_id: str = None, scene_scale: float = 1.0) -> Prop:
     cfg = PROP_PRESETS.get(name)
     if not cfg:
         raise ValueError(f"Unknown prop preset: {name}")
     variants = cfg.get("variants", 1)
     default_variant = cfg.get("default_variant", 0)
-    default_scale = cfg.get("scale", 1.0)
+    sprite_key = cfg.get("sprite_key")
+    # Default scale: prop preset override, otherwise registry scale, else 1.0
+    default_scale = cfg.get("scale", None)
+    if default_scale is None and sprite_key:
+        sprite_cfg = get_sprite_config(sprite_key)
+        default_scale = sprite_cfg.get("scale", 1.0)
+    if default_scale is None:
+        default_scale = 1.0
+    # Base scale comes from caller override or defaults; scene_scale multiplies on top
+    base_scale = scale if scale is not None else default_scale
     is_item = cfg.get("is_item", False)
     item_data = cfg.get("item_data", {})
     # Resolve sprite paths from registry
-    sprite_key = cfg.get("sprite_key")
     sprite_path = None
     mask_path = None
     if sprite_key:
@@ -65,7 +73,8 @@ def make_prop(name: str, x: float, y: float, game=None, variant_index: int = Non
         name=name,
         variants=variants,
         variant_index=variant_index,
-        scale=scale,
+        scale=base_scale,
+        scene_scale=scene_scale,
         is_item=is_item,
         item_data=item_data,
         item_id=final_item_id

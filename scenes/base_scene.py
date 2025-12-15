@@ -3,8 +3,12 @@ import pygame
 import random
 from typing import Any, Optional
 from entities.player import Player
+from entities.npc import NPC
 from world.camera import Camera
 from world.mask_collision import MaskCollisionSystem
+from world.world_props import get_props_for_scene
+from world.world_npcs import get_npcs_for_scene
+from entities.prop_registry import make_prop
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT
 from entities.player_config import (
     PLAYER_HITBOX_OFFSET_CENTERX, 
@@ -51,10 +55,12 @@ class MaskedScene:
     PLAYER_SPRITE_SCALE = None
     PLAYER_SPEED = None
     SCENE_NAME = None  # Subclasses should set this to match registry name
+    SCENE_SCALE = 1.0  # Optional per-scene multiplier for props/items
     
     def __init__(self, game: Any, spawn: tuple = None):
         self.game = game
         self.scene_name = self.SCENE_NAME  # Store scene name for item tracking
+        self.scene_scale = self.SCENE_SCALE if self.SCENE_SCALE is not None else 1.0
         self.active_modal = None  # Holds modal state when an arcade is open
         self.current_interact_prop = None  # Cached interactable prop for this frame
         
@@ -94,29 +100,17 @@ class MaskedScene:
         if not hasattr(self, 'npcs'):
             self.npcs = []
         
-        # Use scene-specific player config if set, otherwise use defaults
+        # Use scene-specific player config if set, otherwise defaults
         player_sprite_scale = self.PLAYER_SPRITE_SCALE if self.PLAYER_SPRITE_SCALE is not None else PLAYER_SPRITE_SCALE
-        
-        # Calculate hitbox dimensions - scale them based on sprite scale
-        if self.PLAYER_HITBOX_WIDTH is None:
-            player_hitbox_width = int(PLAYER_HITBOX_WIDTH * player_sprite_scale / PLAYER_SPRITE_SCALE)
-        else:
-            player_hitbox_width = self.PLAYER_HITBOX_WIDTH
-        
-        if self.PLAYER_HITBOX_HEIGHT is None:
-            player_hitbox_height = int(PLAYER_HITBOX_HEIGHT * player_sprite_scale / PLAYER_SPRITE_SCALE)
-        else:
-            player_hitbox_height = self.PLAYER_HITBOX_HEIGHT
-        
-        if self.PLAYER_HITBOX_OFFSET_CENTERX is None:
-            player_hitbox_offset_centerx = int(PLAYER_HITBOX_OFFSET_CENTERX * player_sprite_scale / PLAYER_SPRITE_SCALE)
-        else:
-            player_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX
-        
-        if self.PLAYER_HITBOX_OFFSET_BOTTOM is None:
-            player_hitbox_offset_bottom = int(PLAYER_HITBOX_OFFSET_BOTTOM * player_sprite_scale / PLAYER_SPRITE_SCALE)
-        else:
-            player_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM
+
+        # Compute hitbox dimensions/offsets with scale helper
+        def _scaled(val, base):
+            return int(val * player_sprite_scale / base) if base else val
+
+        player_hitbox_width = self.PLAYER_HITBOX_WIDTH if self.PLAYER_HITBOX_WIDTH is not None else _scaled(PLAYER_HITBOX_WIDTH, PLAYER_SPRITE_SCALE)
+        player_hitbox_height = self.PLAYER_HITBOX_HEIGHT if self.PLAYER_HITBOX_HEIGHT is not None else _scaled(PLAYER_HITBOX_HEIGHT, PLAYER_SPRITE_SCALE)
+        player_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX if self.PLAYER_HITBOX_OFFSET_CENTERX is not None else _scaled(PLAYER_HITBOX_OFFSET_CENTERX, PLAYER_SPRITE_SCALE)
+        player_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM if self.PLAYER_HITBOX_OFFSET_BOTTOM is not None else _scaled(PLAYER_HITBOX_OFFSET_BOTTOM, PLAYER_SPRITE_SCALE)
         
         # Reuse existing player if available (preserves inventory across scenes)
         if hasattr(game, 'player') and game.player:
@@ -182,10 +176,96 @@ class MaskedScene:
         # Update collision rect after configuring everything
         self.player.collision_rect.centerx = int(self.player.x) + player_hitbox_offset_centerx
         self.player.collision_rect.bottom = int(self.player.y) + player_hitbox_offset_bottom
-        # Props list will be set by subclasses (e.g., in cat_cafe_scene)
+        
+        # Load props from world registry
+        self._load_scene_props()
+        self.player.props = self.props
+        
+        # Load NPCs from world registry
+        self._load_scene_npcs()
+    
+    def _load_scene_props(self) -> None:
+        """Load all props for this scene from the world registry."""
         if not hasattr(self, 'props'):
             self.props = []
-        self.player.props = self.props
+        
+        # Get prop definitions for this scene from world registry
+        prop_defs = get_props_for_scene(self.scene_name)
+        
+        # Create each prop, filtering out picked-up items
+        for prop_def in prop_defs:
+            prop_name = prop_def.get('name')
+            prop_x = prop_def.get('x')
+            prop_y = prop_def.get('y')
+            prop_variant = prop_def.get('variant_index', 0)
+            prop_scale = prop_def.get('scale', None)
+            
+            # Generate item ID for tracking
+            item_id = f"{prop_name}:{int(prop_x)}:{int(prop_y)}"
+            
+            # Skip if this item was already picked up
+            if item_id in self.game.picked_up_items:
+                print(f"Skipping {prop_name} at ({prop_x}, {prop_y}) - already picked up")
+                continue
+            
+            # Create the prop
+            try:
+                prop = make_prop(
+                    prop_name,
+                    prop_x,
+                    prop_y,
+                    self.game,
+                    variant_index=prop_variant,
+                    scale=prop_scale,
+                    item_id=item_id,
+                    scene_scale=self.scene_scale,
+                )
+                self.props.append(prop)
+            except Exception as e:
+                print(f"Warning: Could not create prop {prop_name}: {e}")
+        
+        # Spawn any dropped items for this scene
+        if self.scene_name in self.game.dropped_items:
+            for dropped_item in self.game.dropped_items[self.scene_name]:
+                try:
+                    dropped_prop = make_prop(
+                        dropped_item['name'],
+                        dropped_item['x'],
+                        dropped_item['y'],
+                        self.game,
+                        variant_index=dropped_item.get('variant_index', 0),
+                        scale=dropped_item.get('scale', None),
+                        scene_scale=self.scene_scale,
+                    )
+                    dropped_prop.is_dropped = True
+                    self.props.append(dropped_prop)
+                except Exception as e:
+                    print(f"Warning: Could not respawn dropped item {dropped_item.get('name')}: {e}")
+    
+    def _load_scene_npcs(self) -> None:
+        """Load all NPCs for this scene from the world registry."""
+        if not hasattr(self, 'npcs'):
+            self.npcs = []
+        
+        # Get NPC definitions for this scene from world registry
+        npc_defs = get_npcs_for_scene(self.scene_name)
+        
+        # Create each NPC
+        for npc_def in npc_defs:
+            npc_type = npc_def.get('type')
+            npc_x = npc_def.get('x')
+            npc_y = npc_def.get('y')
+            # Use NPC-specific sprite_scale if provided, otherwise use scene's PLAYER_SPRITE_SCALE
+            npc_sprite_scale = npc_def.get('sprite_scale', self.PLAYER_SPRITE_SCALE or 1.0)
+            
+            try:
+                if npc_type == 'henry':
+                    npc = NPC(npc_x, npc_y, game=self.game, sprite_scale=npc_sprite_scale)
+                    self.npcs.append(npc)
+                else:
+                    print(f"Warning: Unknown NPC type '{npc_type}'")
+            except Exception as e:
+                print(f"Warning: Could not create NPC {npc_type}: {e}")
     
     def _get_mask_path(self, background_path: str) -> str:
         """Convert background path to mask path by inserting '_mask' before extension."""
@@ -228,7 +308,12 @@ class MaskedScene:
             if hasattr(prop, 'variant_index'):
                 item_to_add['variant_index'] = prop.variant_index
             if hasattr(prop, 'scale'):
-                item_to_add['scale'] = prop.scale
+                # Store item-level scale only; scene scale is applied on spawn
+                base_scale = getattr(prop, 'base_scale', None)
+                if base_scale is not None:
+                    item_to_add['scale'] = base_scale
+                else:
+                    item_to_add['scale'] = prop.scale / (self.scene_scale or 1.0)
             self.player.inventory.add_item(item_to_add)
             # Mark the prop as picked up so it doesn't show in the scene
             prop.picked_up = True
@@ -257,7 +342,7 @@ class MaskedScene:
         
         item_name = item.get('name', 'unknown')
         variant_index = item.get('variant_index', 0)
-        scale = item.get('scale', None)
+        base_scale = item.get('scale', None)
         
         # Calculate drop position at player's feet with slight random offset
         import random
@@ -268,7 +353,15 @@ class MaskedScene:
         
         try:
             # Create the prop at drop position (with unique ID for this dropped instance)
-            dropped_prop = make_prop(item_name, drop_x, drop_y, self.game, variant_index=variant_index, scale=scale)
+            dropped_prop = make_prop(
+                item_name,
+                drop_x,
+                drop_y,
+                self.game,
+                variant_index=variant_index,
+                scale=base_scale,
+                scene_scale=self.scene_scale,
+            )
             dropped_prop.picked_up = False
             dropped_prop.is_dropped = True  # Mark as dropped so we handle it differently when picked up
             
@@ -290,7 +383,7 @@ class MaskedScene:
                     'x': drop_x,
                     'y': drop_y,
                     'variant_index': variant_index,
-                    'scale': scale,
+                    'scale': base_scale,
                 })
             
             print(f"Dropped {item_name} at ({drop_x}, {drop_y})")
@@ -366,13 +459,6 @@ class MaskedScene:
             return
 
         self.player.update(dt)
-        # Update NPCs
-        if hasattr(self, 'npcs') and self.npcs:
-            for npc in self.npcs:
-                try:
-                    npc.update(dt)
-                except Exception as e:
-                    print("NPC update error:", e)
         # Cache interactable prop for this frame
         self.current_interact_prop = getattr(self.player, 'interact_prop', None)
 

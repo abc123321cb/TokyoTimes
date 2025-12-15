@@ -15,12 +15,15 @@ class Prop:
     Black pixels in mask = walkable; transparent/other = blocked (collision handled in player).
     """
 
-    def __init__(self, x: float, y: float, sprite_path: str, mask_path: str = None, game=None, name: str = None, variants: int = 1, variant_index: int = 0, scale: float = 1.0, is_item: bool = False, item_data: dict = None, item_id: str = None):
+    def __init__(self, x: float, y: float, sprite_path: str, mask_path: str = None, game=None, name: str = None, variants: int = 1, variant_index: int = 0, scale: float = 1.0, scene_scale: float = 1.0, is_item: bool = False, item_data: dict = None, item_id: str = None):
         self.x = x
         self.y = y
         self.name = name
         self.game = game
-        self.scale = max(0.1, float(scale))
+        self.scene_scale = max(0.1, float(scene_scale)) if scene_scale is not None else 1.0
+        self.base_scale = max(0.1, float(scale)) if scale is not None else 1.0
+        # Combined scale applies item-level scaling and scene-level scaling together
+        self.scale = self.base_scale * self.scene_scale
         self.sprite = None
         self._sheet = None
         self.variants = max(1, int(variants))

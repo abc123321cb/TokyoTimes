@@ -35,7 +35,14 @@ class Player(Character):
         hitbox_height = hitbox_height if hitbox_height is not None else PLAYER_HITBOX_HEIGHT
         hitbox_offset_centerx = hitbox_offset_centerx if hitbox_offset_centerx is not None else PLAYER_HITBOX_OFFSET_CENTERX
         hitbox_offset_bottom = hitbox_offset_bottom if hitbox_offset_bottom is not None else PLAYER_HITBOX_OFFSET_BOTTOM
-        sprite_scale = sprite_scale if sprite_scale is not None else PLAYER_SPRITE_SCALE
+        # Default scale: provided -> scene/player_config -> sprite registry
+        registry_scale = 1.0
+        if game:
+            try:
+                registry_scale = get_sprite_config("player_girl").get("scale", 1.0)
+            except Exception:
+                registry_scale = 1.0
+        sprite_scale = sprite_scale if sprite_scale is not None else (PLAYER_SPRITE_SCALE if PLAYER_SPRITE_SCALE is not None else registry_scale)
         speed = speed if speed is not None else PLAYER_SPEED
         
         self.collision_rect = pygame.Rect(0, 0, hitbox_width, hitbox_height)  # Small hitbox for feet area
@@ -306,11 +313,9 @@ class Player(Character):
         
         super().update(dt)
         if self.animation and self.spritesheet:
-            # Animate only when moving; idle shows first variant
+            # Only animate when moving
             if moving:
                 self.animation.update(dt)
-            else:
-                self.animation.current_frame = 0
             # Get current frame (with scaling applied)
             self.sprite = self.animation.get_current_frame()
 

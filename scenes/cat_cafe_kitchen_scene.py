@@ -20,25 +20,7 @@ class CatCafeKitchenScene(MaskedScene):
     SCENE_NAME = "cat_cafe_kitchen"
     
     def __init__(self, game: Any, spawn: tuple = None):
-        # Initialize props list before calling super().__init__
-        self.props = []
-        
         super().__init__(game, spawn)
-        
-        # Spawn any items that were dropped in this scene
-        if self.SCENE_NAME in game.dropped_items:
-            for dropped_item in game.dropped_items[self.SCENE_NAME]:
-                from entities.prop_registry import make_prop
-                dropped_prop = make_prop(
-                    dropped_item['name'],
-                    dropped_item['x'],
-                    dropped_item['y'],
-                    game,
-                    variant_index=dropped_item.get('variant_index', 0),
-                    scale=dropped_item.get('scale', None)
-                )
-                dropped_prop.is_dropped = True  # Mark as dropped
-                self.props.append(dropped_prop)
         
         # Update player's prop reference if player exists
         if hasattr(self, 'player'):
