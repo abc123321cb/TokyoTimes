@@ -16,8 +16,8 @@ WORLD_PROPS = {
         },
         {
             "name": "cat_food_dish",
-            "x": 850,
-            "y": 650,
+            "x": 980,
+            "y": 670,
             "scale": 2.0,  # Item-level scale override
         },
     ],

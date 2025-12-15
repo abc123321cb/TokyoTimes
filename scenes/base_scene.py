@@ -25,7 +25,7 @@ from scenes.minigames.asteroids import AsteroidsState
 
 
 # Debug flag - set to False to hide collision/portal debug visuals
-DEBUG_DRAW = False
+DEBUG_DRAW = True
 
 
 class MaskedScene:
@@ -257,15 +257,24 @@ class MaskedScene:
             npc_y = npc_def.get('y')
             # Use NPC-specific sprite_scale if provided, otherwise use scene's PLAYER_SPRITE_SCALE
             npc_sprite_scale = npc_def.get('sprite_scale', self.PLAYER_SPRITE_SCALE or 1.0)
+            destination = npc_def.get('destination', None)
             
             try:
                 if npc_type == 'henry':
                     npc = NPC(npc_x, npc_y, game=self.game, sprite_scale=npc_sprite_scale)
+                    npc.mask_system = self.mask_system
+                    npc.props = self.props
+                    npc.scene = self
+                    # If destination is specified, pathfind to it
+                    if destination:
+                        npc.pathfind_to(destination[0], destination[1])
                     self.npcs.append(npc)
                 else:
                     print(f"Warning: Unknown NPC type '{npc_type}'")
             except Exception as e:
                 print(f"Warning: Could not create NPC {npc_type}: {e}")
+                import traceback
+                traceback.print_exc()
     
     def _get_mask_path(self, background_path: str) -> str:
         """Convert background path to mask path by inserting '_mask' before extension."""
@@ -348,8 +357,26 @@ class MaskedScene:
         import random
         offset_x = random.randint(-20, 20)
         offset_y = random.randint(-10, 10)
-        drop_x = player.collision_rect.centerx + offset_x
-        drop_y = player.collision_rect.bottom + offset_y
+        
+        # Use frame-based collision box if available
+        if hasattr(player, '_get_frame_collision_box'):
+            try:
+                frame_box = player._get_frame_collision_box()
+                if frame_box:
+                    drop_rect = frame_box.copy()
+                    drop_rect.x += int(player.x)
+                    drop_rect.y += int(player.y)
+                    drop_x = drop_rect.centerx + offset_x
+                    drop_y = drop_rect.bottom + offset_y
+                else:
+                    drop_x = player.collision_rect.centerx + offset_x
+                    drop_y = player.collision_rect.bottom + offset_y
+            except:
+                drop_x = player.collision_rect.centerx + offset_x
+                drop_y = player.collision_rect.bottom + offset_y
+        else:
+            drop_x = player.collision_rect.centerx + offset_x
+            drop_y = player.collision_rect.bottom + offset_y
         
         try:
             # Create the prop at drop position (with unique ID for this dropped instance)
@@ -461,12 +488,33 @@ class MaskedScene:
         self.player.update(dt)
         # Cache interactable prop for this frame
         self.current_interact_prop = getattr(self.player, 'interact_prop', None)
+        
+        # Update NPCs
+        if hasattr(self, 'npcs'):
+            for npc in self.npcs:
+                npc.update(dt)
 
         self.camera.follow(self.player.x, self.player.y, self.world_width, self.world_height)
         
         # Check portals
         if self.mask_system:
-            portal_id = self.mask_system.rect_in_portal(self.player.collision_rect)
+            # Use frame-based collision box if available, otherwise use static rect
+            if hasattr(self.player, '_get_frame_collision_box'):
+                try:
+                    frame_box = self.player._get_frame_collision_box()
+                    if frame_box:
+                        # Position frame box at player's current position
+                        portal_rect = frame_box.copy()
+                        portal_rect.x += int(self.player.x)
+                        portal_rect.y += int(self.player.y)
+                    else:
+                        portal_rect = self.player.collision_rect
+                except:
+                    portal_rect = self.player.collision_rect
+            else:
+                portal_rect = self.player.collision_rect
+            
+            portal_id = self.mask_system.rect_in_portal(portal_rect)
             if portal_id is not None and portal_id in self.PORTAL_MAP:
                 self._enter_portal(portal_id)
     
@@ -493,7 +541,18 @@ class MaskedScene:
         drawables = []
         
         # Add player, depth based on feet (collision rect bottom)
-        player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
+        # Use frame-based collision box if available for accurate depth
+        if hasattr(self.player, '_get_frame_collision_box'):
+            try:
+                frame_box = self.player._get_frame_collision_box()
+                if frame_box:
+                    player_depth = int(self.player.y) + frame_box.bottom
+                else:
+                    player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
+            except:
+                player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
+        else:
+            player_depth = self.player.collision_rect.bottom if hasattr(self.player, 'collision_rect') else (self.player.y + (self.player.sprite.get_height() if self.player.sprite else 0))
         drawables.append(('player', self.player, player_depth))
         
         # Add NPCs
@@ -534,11 +593,38 @@ class MaskedScene:
                 
                 # Draw hitbox (debug)
                 if DEBUG_DRAW and hasattr(obj, 'collision_rect'):
-                    coll_x, coll_y = self.camera.apply(obj.collision_rect.x, obj.collision_rect.y)
-                    hb_surf = pygame.Surface((obj.collision_rect.width, obj.collision_rect.height), pygame.SRCALPHA)
-                    hb_surf.fill((0, 255, 0, 80))
-                    surface.blit(hb_surf, (coll_x, coll_y))
-                    pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
+                    # Use frame-based collision box if available, otherwise use static rect
+                    if hasattr(obj, '_get_frame_collision_box'):
+                        try:
+                            frame_box = obj._get_frame_collision_box()
+                            if frame_box:
+                                # Position frame box at player's current position
+                                hitbox_x = frame_box.x + int(obj.x)
+                                hitbox_y = frame_box.y + int(obj.y)
+                                coll_x, coll_y = self.camera.apply(hitbox_x, hitbox_y)
+                                hb_surf = pygame.Surface((frame_box.width, frame_box.height), pygame.SRCALPHA)
+                                hb_surf.fill((0, 255, 0, 80))
+                                surface.blit(hb_surf, (coll_x, coll_y))
+                                pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, frame_box.width, frame_box.height), 2)
+                            else:
+                                # Fallback to static rect
+                                coll_x, coll_y = self.camera.apply(obj.collision_rect.x, obj.collision_rect.y)
+                                hb_surf = pygame.Surface((obj.collision_rect.width, obj.collision_rect.height), pygame.SRCALPHA)
+                                hb_surf.fill((0, 255, 0, 80))
+                                surface.blit(hb_surf, (coll_x, coll_y))
+                                pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
+                        except:
+                            coll_x, coll_y = self.camera.apply(obj.collision_rect.x, obj.collision_rect.y)
+                            hb_surf = pygame.Surface((obj.collision_rect.width, obj.collision_rect.height), pygame.SRCALPHA)
+                            hb_surf.fill((0, 255, 0, 80))
+                            surface.blit(hb_surf, (coll_x, coll_y))
+                            pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
+                    else:
+                        coll_x, coll_y = self.camera.apply(obj.collision_rect.x, obj.collision_rect.y)
+                        hb_surf = pygame.Surface((obj.collision_rect.width, obj.collision_rect.height), pygame.SRCALPHA)
+                        hb_surf.fill((0, 255, 0, 80))
+                        surface.blit(hb_surf, (coll_x, coll_y))
+                        pygame.draw.rect(surface, (0, 255, 0), (coll_x, coll_y, obj.collision_rect.width, obj.collision_rect.height), 2)
             
             elif obj_type == 'npc':
                 npc_x, npc_y = self.camera.apply(obj.x, obj.y)
@@ -550,17 +636,33 @@ class MaskedScene:
             elif obj_type == 'prop':
                 obj.draw(surface, camera=self.camera)
                 
-                # Draw prop bounding box (debug)
+                # Draw prop debug boxes
                 if DEBUG_DRAW:
-                    if hasattr(obj, 'mask') and obj.mask:
-                        prop_x, prop_y = self.camera.apply(obj.x, obj.y)
-                        prop_scale = getattr(obj, 'scale', 1.0)
-                        mask_width = int(obj.mask.get_width() * prop_scale)
-                        mask_height = int(obj.mask.get_height() * prop_scale)
-                        pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, mask_width, mask_height), 2)
-                    elif hasattr(obj, 'rect'):
-                        prop_x, prop_y = self.camera.apply(obj.rect.x, obj.rect.y)
-                        pygame.draw.rect(surface, (255, 128, 0), (prop_x, prop_y, obj.rect.width, obj.rect.height), 2)
+                    prop_scale = getattr(obj, 'scale', 1.0)
+                    
+                    # Draw collision areas (blocking) in green
+                    if hasattr(obj, 'collision_rects'):
+                        for collision_rect in obj.collision_rects:
+                            screen_rect = pygame.Rect(
+                                int(obj.x + collision_rect.x * prop_scale),
+                                int(obj.y + collision_rect.y * prop_scale),
+                                int(collision_rect.width * prop_scale),
+                                int(collision_rect.height * prop_scale)
+                            )
+                            screen_x, screen_y = self.camera.apply(screen_rect.x, screen_rect.y)
+                            pygame.draw.rect(surface, (0, 255, 0), (screen_x, screen_y, screen_rect.width, screen_rect.height), 2)
+                    
+                    # Draw interaction areas in orange
+                    if hasattr(obj, 'interaction_rects'):
+                        for interaction_rect in obj.interaction_rects:
+                            screen_rect = pygame.Rect(
+                                int(obj.x + interaction_rect.x * prop_scale),
+                                int(obj.y + interaction_rect.y * prop_scale),
+                                int(interaction_rect.width * prop_scale),
+                                int(interaction_rect.height * prop_scale)
+                            )
+                            screen_x, screen_y = self.camera.apply(screen_rect.x, screen_rect.y)
+                            pygame.draw.rect(surface, (255, 128, 0), (screen_x, screen_y, screen_rect.width, screen_rect.height), 2)
 
         # Modal overlay
         if self.active_modal:

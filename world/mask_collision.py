@@ -66,8 +66,22 @@ class MaskCollisionSystem:
         return False
     
     def rect_in_portal(self, rect: pygame.Rect) -> Optional[int]:
-        """Check if rect center is in a portal region. Returns portal ID or None."""
-        return self.is_portal(rect.centerx, rect.centery)
+        """Check if rect intersects with any portal region. Returns portal ID or None."""
+        # Check if any corner or center point is in a portal
+        test_points = [
+            (rect.left, rect.top),
+            (rect.right - 1, rect.top),
+            (rect.left, rect.bottom - 1),
+            (rect.right - 1, rect.bottom - 1),
+            (rect.centerx, rect.centery),
+        ]
+        
+        for x, y in test_points:
+            portal_id = self.is_portal(x, y)
+            if portal_id is not None:
+                return portal_id
+        
+        return None
     
     def _detect_portal_regions(self) -> dict[int, set[tuple[int, int]]]:
         """Detect white portal regions using flood fill.

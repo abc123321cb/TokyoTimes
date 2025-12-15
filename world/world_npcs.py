@@ -6,8 +6,9 @@ WORLD_NPCS = {
     "cat_cafe": [
         {
             "type": "henry",
-            "x": 680,
-            "y": 500,
+            "x": 400,
+            "y": 650,
+            "destination": (1250, 450),  # Optional: NPC will pathfind to this location when scene loads
             # Optional: "sprite_scale": 0.5  (defaults to scene PLAYER_SPRITE_SCALE)
         },
     ],

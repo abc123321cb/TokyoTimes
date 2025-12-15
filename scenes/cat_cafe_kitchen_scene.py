@@ -8,7 +8,7 @@ from scenes.scene_registry import register_scene
 PORTAL_MAP = {
     0: {
         "to_scene": "cat_cafe",
-        "spawn": (650, 920),
+        "spawn": (650, 850),
     },
 }
 

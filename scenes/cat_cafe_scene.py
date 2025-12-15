@@ -9,11 +9,11 @@ from scenes.scene_registry import register_scene
 PORTAL_MAP = {
     0: {
         "to_scene": "cat_cafe_kitchen",
-        "spawn": (1085, 460),
+        "spawn": (1085, 490),
     },
     1: {
         "to_scene": "cat_cafe_kitchen",
-        "spawn": (1085, 460),
+        "spawn": (1085, 490),
     },
 }
 

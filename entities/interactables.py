@@ -34,6 +34,8 @@ class Prop:
         self.picked_up = False
         self.mask = None
         self._mask_sheet = None
+        self.collision_rects = []  # Blocking areas (scaled)
+        self.interaction_rects = []  # Interactable white areas (scaled)
 
         loader = SpriteLoader(game.assets) if game else None
         if game and sprite_path:
@@ -87,7 +89,66 @@ class Prop:
                 mask_frame = pygame.Surface((mask_frame_w, mask_frame_h), pygame.SRCALPHA)
                 mask_frame.blit(self._mask_sheet, (0, 0), mask_src_rect)
                 self.mask = mask_frame
+        
+        # Extract collision boxes from mask
+        if self.mask:
+            self._extract_collision_boxes()
 
+    def _extract_collision_boxes(self):
+        """Extract bounding boxes for collision and interaction areas from mask."""
+        if not self.mask:
+            return
+        
+        # Find all blocking pixels (transparent or colored, not black/white)
+        blocking_pixels = set()
+        interaction_pixels = set()
+        
+        for y in range(self.mask.get_height()):
+            for x in range(self.mask.get_width()):
+                try:
+                    color = self.mask.get_at((x, y))
+                    r = color[0] if len(color) >= 1 else 0
+                    g = color[1] if len(color) >= 2 else 0
+                    b = color[2] if len(color) >= 3 else 0
+                    a = color[3] if len(color) >= 4 else 255
+                    
+                    is_black = r < 50 and g < 50 and b < 50
+                    is_white = r > 200 and g > 200 and b > 200
+                    
+                    if is_white:
+                        interaction_pixels.add((x, y))
+                    elif a == 0 or not is_black:
+                        # Transparent or colored = blocking
+                        blocking_pixels.add((x, y))
+                except:
+                    pass
+        
+        # Extract bounding box for blocking area
+        if blocking_pixels:
+            min_x = min(p[0] for p in blocking_pixels)
+            max_x = max(p[0] for p in blocking_pixels)
+            min_y = min(p[1] for p in blocking_pixels)
+            max_y = max(p[1] for p in blocking_pixels)
+            
+            # Store scaled rect relative to prop position
+            unscaled_rect = pygame.Rect(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+            self.collision_rects = [unscaled_rect]
+        else:
+            self.collision_rects = []
+        
+        # Extract bounding box for interaction area
+        if interaction_pixels:
+            min_x = min(p[0] for p in interaction_pixels)
+            max_x = max(p[0] for p in interaction_pixels)
+            min_y = min(p[1] for p in interaction_pixels)
+            max_y = max(p[1] for p in interaction_pixels)
+            
+            # Store scaled rect relative to prop position
+            unscaled_rect = pygame.Rect(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+            self.interaction_rects = [unscaled_rect]
+        else:
+            self.interaction_rects = []
+    
     def set_variant(self, index: int):
         """Switch to a different variant sprite and mask."""
         self.variant_index = int(index)
