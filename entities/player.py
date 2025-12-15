@@ -11,14 +11,13 @@ from entities.player_config import (
     PLAYER_HITBOX_OFFSET_CENTERX,
     PLAYER_HITBOX_OFFSET_BOTTOM,
     PLAYER_SPEED,
-    PLAYER_SPRITE_SCALE,
 )
 
 class Player(Character):
     def __init__(self, x: float = 0, y: float = 0, game=None, 
                  hitbox_width: int = None, hitbox_height: int = None,
                  hitbox_offset_centerx: int = None, hitbox_offset_bottom: int = None,
-                 sprite_scale: float = None, speed: int = None):
+                 sprite_scale: float = None, speed: int = None, scene_scale: float = 1.0):
         self.game = game
         self.animation = None
         self.spritesheet = None
@@ -36,18 +35,21 @@ class Player(Character):
         hitbox_height = hitbox_height if hitbox_height is not None else PLAYER_HITBOX_HEIGHT
         hitbox_offset_centerx = hitbox_offset_centerx if hitbox_offset_centerx is not None else PLAYER_HITBOX_OFFSET_CENTERX
         hitbox_offset_bottom = hitbox_offset_bottom if hitbox_offset_bottom is not None else PLAYER_HITBOX_OFFSET_BOTTOM
-        # Default scale: provided -> scene/player_config -> sprite registry
+        # Default scale: provided -> sprite registry
         registry_scale = 1.0
         if game:
             try:
                 registry_scale = get_sprite_config("player_girl").get("scale", 1.0)
             except Exception:
                 registry_scale = 1.0
-        sprite_scale = sprite_scale if sprite_scale is not None else (PLAYER_SPRITE_SCALE if PLAYER_SPRITE_SCALE is not None else registry_scale)
+        base_scale = sprite_scale if sprite_scale is not None else registry_scale
         speed = speed if speed is not None else PLAYER_SPEED
         
         self.collision_rect = pygame.Rect(0, 0, hitbox_width, hitbox_height)  # Kept for compatibility
-        self.sprite_scale = sprite_scale
+        self.base_scale = base_scale
+        self.scene_scale = max(0.1, float(scene_scale)) if scene_scale is not None else 1.0
+        # Combined scale applies base scale and scene-level multiplier together
+        self.sprite_scale = self.base_scale * self.scene_scale
         self.collision_mask_extractor = None  # Will be loaded if mask exists
         
         if game:

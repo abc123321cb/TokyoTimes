@@ -16,8 +16,8 @@ PORTAL_MAP = {
 class CatCafeKitchenScene(MaskedScene):
     BACKGROUND_PATH = "backgrounds/cat_cafe_kitchen.jpg"
     PORTAL_MAP = PORTAL_MAP
-    PLAYER_SPRITE_SCALE = 0.6
     SCENE_NAME = "cat_cafe_kitchen"
+    SCENE_SCALE = 1.1
     
     def __init__(self, game: Any, spawn: tuple = None):
         super().__init__(game, spawn)

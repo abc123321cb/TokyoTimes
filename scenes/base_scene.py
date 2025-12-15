@@ -9,13 +9,13 @@ from world.mask_collision import MaskCollisionSystem
 from world.world_props import get_props_for_scene
 from world.world_npcs import get_npcs_for_scene
 from entities.prop_registry import make_prop
+from world.scene_graph import register_scene_portals
 from settings import WINDOW_WIDTH, WINDOW_HEIGHT
 from entities.player_config import (
     PLAYER_HITBOX_OFFSET_CENTERX, 
     PLAYER_HITBOX_OFFSET_BOTTOM,
     PLAYER_HITBOX_WIDTH,
     PLAYER_HITBOX_HEIGHT,
-    PLAYER_SPRITE_SCALE,
     PLAYER_SPEED,
 )
 from scenes.minigames.blocks import BlocksState
@@ -39,8 +39,8 @@ class MaskedScene:
     - PLAYER_HITBOX_HEIGHT
     - PLAYER_HITBOX_OFFSET_CENTERX
     - PLAYER_HITBOX_OFFSET_BOTTOM
-    - PLAYER_SPRITE_SCALE
     - PLAYER_SPEED
+    - SCENE_SCALE (multiplier for all objects, default 1.0)
     """
     
     # Subclasses should set these
@@ -52,7 +52,6 @@ class MaskedScene:
     PLAYER_HITBOX_HEIGHT = None
     PLAYER_HITBOX_OFFSET_CENTERX = None
     PLAYER_HITBOX_OFFSET_BOTTOM = None
-    PLAYER_SPRITE_SCALE = None
     PLAYER_SPEED = None
     SCENE_NAME = None  # Subclasses should set this to match registry name
     SCENE_SCALE = 1.0  # Optional per-scene multiplier for props/items
@@ -63,6 +62,10 @@ class MaskedScene:
         self.scene_scale = self.SCENE_SCALE if self.SCENE_SCALE is not None else 1.0
         self.active_modal = None  # Holds modal state when an arcade is open
         self.current_interact_prop = None  # Cached interactable prop for this frame
+        
+        # Register this scene's portals with the scene graph
+        if self.SCENE_NAME and self.PORTAL_MAP:
+            register_scene_portals(self.SCENE_NAME, self.PORTAL_MAP)
         
         # Load background
         try:
@@ -100,24 +103,21 @@ class MaskedScene:
         if not hasattr(self, 'npcs'):
             self.npcs = []
         
-        # Use scene-specific player config if set, otherwise defaults
-        player_sprite_scale = self.PLAYER_SPRITE_SCALE if self.PLAYER_SPRITE_SCALE is not None else PLAYER_SPRITE_SCALE
-
-        # Compute hitbox dimensions/offsets with scale helper
-        def _scaled(val, base):
-            return int(val * player_sprite_scale / base) if base else val
-
-        player_hitbox_width = self.PLAYER_HITBOX_WIDTH if self.PLAYER_HITBOX_WIDTH is not None else _scaled(PLAYER_HITBOX_WIDTH, PLAYER_SPRITE_SCALE)
-        player_hitbox_height = self.PLAYER_HITBOX_HEIGHT if self.PLAYER_HITBOX_HEIGHT is not None else _scaled(PLAYER_HITBOX_HEIGHT, PLAYER_SPRITE_SCALE)
-        player_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX if self.PLAYER_HITBOX_OFFSET_CENTERX is not None else _scaled(PLAYER_HITBOX_OFFSET_CENTERX, PLAYER_SPRITE_SCALE)
-        player_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM if self.PLAYER_HITBOX_OFFSET_BOTTOM is not None else _scaled(PLAYER_HITBOX_OFFSET_BOTTOM, PLAYER_SPRITE_SCALE)
+        # Use default hitbox dimensions/offsets (player gets scale from sprite registry)
+        player_hitbox_width = self.PLAYER_HITBOX_WIDTH if self.PLAYER_HITBOX_WIDTH is not None else PLAYER_HITBOX_WIDTH
+        player_hitbox_height = self.PLAYER_HITBOX_HEIGHT if self.PLAYER_HITBOX_HEIGHT is not None else PLAYER_HITBOX_HEIGHT
+        player_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX if self.PLAYER_HITBOX_OFFSET_CENTERX is not None else PLAYER_HITBOX_OFFSET_CENTERX
+        player_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM if self.PLAYER_HITBOX_OFFSET_BOTTOM is not None else PLAYER_HITBOX_OFFSET_BOTTOM
         
         # Reuse existing player if available (preserves inventory across scenes)
         if hasattr(game, 'player') and game.player:
             self.player = game.player
-            # Update player's scale and regenerate animations if scale changed
-            if self.player.sprite_scale != player_sprite_scale:
-                self.player.sprite_scale = player_sprite_scale
+            # Update player's scene-level scaling if it changed
+            old_combined_scale = self.player.sprite_scale
+            self.player.scene_scale = self.scene_scale
+            self.player.sprite_scale = self.player.base_scale * self.scene_scale
+            # Recreate animations with new scale if combined scale changed
+            if self.player.sprite_scale != old_combined_scale:
                 # Recreate animations with new scale
                 if hasattr(self.player, 'spritesheet') and self.player.spritesheet:
                     self.player.animations["down"] = self.player._create_animation([0, 1, 0, 2])
@@ -154,8 +154,8 @@ class MaskedScene:
                     hitbox_height=player_hitbox_height,
                     hitbox_offset_centerx=player_hitbox_offset_centerx,
                     hitbox_offset_bottom=player_hitbox_offset_bottom,
-                    sprite_scale=player_sprite_scale,
-                    speed=self.PLAYER_SPEED
+                    speed=self.PLAYER_SPEED,
+                    scene_scale=self.scene_scale
                 )
             else:
                 self.player = Player(
@@ -164,8 +164,8 @@ class MaskedScene:
                     hitbox_height=player_hitbox_height,
                     hitbox_offset_centerx=player_hitbox_offset_centerx,
                     hitbox_offset_bottom=player_hitbox_offset_bottom,
-                    sprite_scale=player_sprite_scale,
-                    speed=self.PLAYER_SPEED
+                    speed=self.PLAYER_SPEED,
+                    scene_scale=self.scene_scale
                 )
             # Store player on game object
             game.player = self.player
@@ -185,44 +185,33 @@ class MaskedScene:
         self._load_scene_npcs()
     
     def _load_scene_props(self) -> None:
-        """Load all props for this scene from the world registry."""
+        """Load props currently in this scene from the world registry."""
+        from world.world_registry import get_props_in_scene
+        
         if not hasattr(self, 'props'):
             self.props = []
         
-        # Get prop definitions for this scene from world registry
-        prop_defs = get_props_for_scene(self.scene_name)
+        # Get props that are currently in this scene from the world registry
+        props_in_scene = get_props_in_scene(self.scene_name)
         
-        # Create each prop, filtering out picked-up items
-        for prop_def in prop_defs:
-            prop_name = prop_def.get('name')
-            prop_x = prop_def.get('x')
-            prop_y = prop_def.get('y')
-            prop_variant = prop_def.get('variant_index', 0)
-            prop_scale = prop_def.get('scale', None)
-            
-            # Generate item ID for tracking
-            item_id = f"{prop_name}:{int(prop_x)}:{int(prop_y)}"
-            
-            # Skip if this item was already picked up
-            if item_id in self.game.picked_up_items:
-                print(f"Skipping {prop_name} at ({prop_x}, {prop_y}) - already picked up")
+        for prop in props_in_scene:
+            # Skip if already picked up
+            if getattr(prop, 'picked_up', False):
                 continue
             
-            # Create the prop
-            try:
-                prop = make_prop(
-                    prop_name,
-                    prop_x,
-                    prop_y,
-                    self.game,
-                    variant_index=prop_variant,
-                    scale=prop_scale,
-                    item_id=item_id,
-                    scene_scale=self.scene_scale,
-                )
+            # Update prop's scene-level scaling if it changed
+            old_combined_scale = prop.scale
+            prop.scene_scale = self.scene_scale
+            prop.scale = prop.base_scale * prop.scene_scale
+            
+            # Rebuild variant surface if scale changed (will update sprite and collision boxes)
+            if prop.scale != old_combined_scale and hasattr(prop, '_rebuild_variant_surface'):
+                prop._rebuild_variant_surface()
+            
+            # Don't re-add if already in the list
+            if prop not in self.props:
                 self.props.append(prop)
-            except Exception as e:
-                print(f"Warning: Could not create prop {prop_name}: {e}")
+                print(f"Loaded prop {getattr(prop, 'prop_id', 'unknown')} to {self.scene_name}")
         
         # Spawn any dropped items for this scene
         if self.scene_name in self.game.dropped_items:
@@ -243,38 +232,62 @@ class MaskedScene:
                     print(f"Warning: Could not respawn dropped item {dropped_item.get('name')}: {e}")
     
     def _load_scene_npcs(self) -> None:
-        """Load all NPCs for this scene from the world registry."""
+        """Load NPCs currently in this scene from the world registry."""
+        from world.world_registry import get_npcs_in_scene
+        
         if not hasattr(self, 'npcs'):
             self.npcs = []
         
-        # Get NPC definitions for this scene from world registry
-        npc_defs = get_npcs_for_scene(self.scene_name)
+        # Get NPCs that are currently in this scene from the world registry
+        npcs_in_scene = get_npcs_in_scene(self.scene_name)
         
-        # Create each NPC
-        for npc_def in npc_defs:
-            npc_type = npc_def.get('type')
-            npc_x = npc_def.get('x')
-            npc_y = npc_def.get('y')
-            # Use NPC-specific sprite_scale if provided, otherwise use scene's PLAYER_SPRITE_SCALE
-            npc_sprite_scale = npc_def.get('sprite_scale', self.PLAYER_SPRITE_SCALE or 1.0)
-            destination = npc_def.get('destination', None)
+        for npc in npcs_in_scene:
+            # Update NPC's scene reference and systems
+            npc.scene = self
+            npc.mask_system = self.mask_system
+            npc.props = self.props
             
-            try:
-                if npc_type == 'henry':
-                    npc = NPC(npc_x, npc_y, game=self.game, sprite_scale=npc_sprite_scale)
-                    npc.mask_system = self.mask_system
-                    npc.props = self.props
-                    npc.scene = self
-                    # If destination is specified, pathfind to it
-                    if destination:
-                        npc.pathfind_to(destination[0], destination[1])
-                    self.npcs.append(npc)
-                else:
-                    print(f"Warning: Unknown NPC type '{npc_type}'")
-            except Exception as e:
-                print(f"Warning: Could not create NPC {npc_type}: {e}")
-                import traceback
-                traceback.print_exc()
+            # Update NPC's scene-level scaling if it changed
+            old_combined_scale = npc.sprite_scale
+            npc.scene_scale = self.scene_scale
+            npc.sprite_scale = npc.base_scale * npc.scene_scale
+            
+            # Recreate animations with new scale if combined scale changed
+            if npc.sprite_scale != old_combined_scale and hasattr(npc, 'spritesheet') and npc.spritesheet:
+                npc.idle_animations["down"] = npc._create_animation([0])
+                npc.idle_animations["up"] = npc._create_animation([3])
+                npc.idle_animations["right"] = npc._create_animation([6])
+                npc.idle_animations["left"] = npc._create_animation_mirrored([6])
+                npc.moving_animations["down"] = npc._create_animation([0, 1, 0, 2])
+                npc.moving_animations["up"] = npc._create_animation([3, 4, 3, 5])
+                npc.moving_animations["right"] = npc._create_animation([6, 7, 6, 8])
+                npc.moving_animations["left"] = npc._create_animation_mirrored([6, 7, 6, 8])
+            
+            # Don't re-add if already in the list
+            if npc not in self.npcs:
+                self.npcs.append(npc)
+                print(f"Loaded NPC {getattr(npc, 'npc_id', 'unknown')} to {self.scene_name}")
+                
+                # Continue cross-scene pathfinding if applicable
+                if npc.scene_path and npc.current_scene_step < len(npc.scene_path):
+                    next_step = npc.scene_path[npc.current_scene_step]
+                    if next_step[0] == self.scene_name:
+                        # We're in the right scene, continue to next portal or destination
+                        if npc.current_scene_step + 1 < len(npc.scene_path):
+                            # Path to next portal
+                            next_portal_step = npc.scene_path[npc.current_scene_step]
+                            next_portal_id = next_portal_step[1]
+                            if next_portal_id is not None:
+                                portal_bounds = self.mask_system.get_portal_bounds(next_portal_id)
+                                if portal_bounds:
+                                    portal_center_x = portal_bounds.centerx
+                                    portal_center_y = portal_bounds.centery
+                                    # Don't avoid portals when intentionally trying to reach one
+                                    npc.pathfind_to(portal_center_x, portal_center_y, avoid_portals=False)
+                        else:
+                            # Reached final scene
+                            npc.scene_path = None
+                            npc.target_scene = None
     
     def _get_mask_path(self, background_path: str) -> str:
         """Convert background path to mask path by inserting '_mask' before extension."""
@@ -346,15 +359,15 @@ class MaskedScene:
             print("Warning: Player has no inventory to pick up item into")
 
     def _spawn_dropped_item(self, item: dict, player: Any) -> None:
-        """Spawn an item prop at the player's feet position."""
+        """Spawn an item prop at the player's feet position, finding a valid location if needed."""
         from entities.prop_registry import make_prop
+        import random
         
         item_name = item.get('name', 'unknown')
         variant_index = item.get('variant_index', 0)
         base_scale = item.get('scale', None)
         
-        # Calculate drop position at player's feet with slight random offset
-        import random
+        # Calculate initial drop position at player's feet with slight random offset
         offset_x = random.randint(-20, 20)
         offset_y = random.randint(-10, 10)
         
@@ -366,17 +379,20 @@ class MaskedScene:
                     drop_rect = frame_box.copy()
                     drop_rect.x += int(player.x)
                     drop_rect.y += int(player.y)
-                    drop_x = drop_rect.centerx + offset_x
-                    drop_y = drop_rect.bottom + offset_y
+                    initial_x = drop_rect.centerx + offset_x
+                    initial_y = drop_rect.bottom + offset_y
                 else:
-                    drop_x = player.collision_rect.centerx + offset_x
-                    drop_y = player.collision_rect.bottom + offset_y
+                    initial_x = player.collision_rect.centerx + offset_x
+                    initial_y = player.collision_rect.bottom + offset_y
             except:
-                drop_x = player.collision_rect.centerx + offset_x
-                drop_y = player.collision_rect.bottom + offset_y
+                initial_x = player.collision_rect.centerx + offset_x
+                initial_y = player.collision_rect.bottom + offset_y
         else:
-            drop_x = player.collision_rect.centerx + offset_x
-            drop_y = player.collision_rect.bottom + offset_y
+            initial_x = player.collision_rect.centerx + offset_x
+            initial_y = player.collision_rect.bottom + offset_y
+        
+        # Find a valid drop location (no collision with walls or props)
+        drop_x, drop_y = self._find_valid_drop_location(initial_x, initial_y, item_name)
         
         try:
             # Create the prop at drop position (with unique ID for this dropped instance)
@@ -416,6 +432,69 @@ class MaskedScene:
             print(f"Dropped {item_name} at ({drop_x}, {drop_y})")
         except Exception as e:
             print(f"Failed to drop item {item_name}: {e}")
+    
+    def _find_valid_drop_location(self, initial_x: float, initial_y: float, item_name: str, max_attempts: int = 20) -> tuple:
+        """Find a valid location to drop an item by searching in a spiral pattern around the initial position.
+        
+        Returns: (x, y) tuple of a valid drop location
+        """
+        import math
+        
+        # Check if a location is valid (not blocked by mask and not overlapping props)
+        def is_valid_drop_location(x, y):
+            # Check collision mask
+            if self.mask_system and not self.mask_system.is_walkable(int(x), int(y)):
+                return False
+            
+            # Check collision with other props
+            if hasattr(self, 'props'):
+                for prop in self.props:
+                    if prop.name == item_name and prop.x == initial_x and prop.y == initial_y:
+                        # Skip the prop we're currently dropping
+                        continue
+                    
+                    # Get prop collision rects
+                    if hasattr(prop, 'collision_rects') and prop.collision_rects:
+                        for collision_rect in prop.collision_rects:
+                            # Scale the rect according to prop scale
+                            prop_scale = getattr(prop, 'scale', 1.0)
+                            scaled_rect = collision_rect.copy()
+                            scaled_rect.x = int(prop.x + collision_rect.x * prop_scale)
+                            scaled_rect.y = int(prop.y + collision_rect.y * prop_scale)
+                            scaled_rect.width = int(collision_rect.width * prop_scale)
+                            scaled_rect.height = int(collision_rect.height * prop_scale)
+                            
+                            # Check if drop point is too close (within 15 pixels of collision box)
+                            if (abs(x - scaled_rect.centerx) < 15 and 
+                                abs(y - scaled_rect.centery) < 15):
+                                return False
+            
+            return True
+        
+        # Try initial position first
+        if is_valid_drop_location(initial_x, initial_y):
+            return (initial_x, initial_y)
+        
+        # Spiral search around initial position
+        for attempt in range(1, max_attempts):
+            # Create a spiral pattern: 4 points per "ring"
+            ring = (attempt - 1) // 4 + 1
+            step = 30 * ring  # Increase distance each ring
+            
+            # Try 8 directions in expanding rings
+            angles = [0, 45, 90, 135, 180, 225, 270, 315]
+            for angle_deg in angles:
+                angle_rad = math.radians(angle_deg)
+                test_x = initial_x + step * math.cos(angle_rad)
+                test_y = initial_y + step * math.sin(angle_rad)
+                
+                if is_valid_drop_location(test_x, test_y):
+                    print(f"Found valid drop location at ({test_x:.0f}, {test_y:.0f}) after {attempt} attempts")
+                    return (test_x, test_y)
+        
+        # Fallback: return initial position even if invalid (shouldn't happen in normal play)
+        print(f"Warning: Could not find valid drop location for {item_name}, using initial position")
+        return (initial_x, initial_y)
     
     def handle_event(self, event: pygame.event.Event) -> None:
         # If a modal is open, route inputs or close
@@ -632,6 +711,28 @@ class MaskedScene:
                     surface.blit(obj.sprite, (npc_x, npc_y))
                 else:
                     pygame.draw.rect(surface, (180, 180, 220), (npc_x, npc_y, 40, 60))
+                
+                # Draw NPC position marker (feet/coordinate)
+                if DEBUG_DRAW:
+                    # Get actual feet position and draw circle there
+                    if hasattr(obj, '_get_feet_position'):
+                        feet_x, feet_y = obj._get_feet_position()
+                        screen_feet_x, screen_feet_y = self.camera.apply(feet_x, feet_y)
+                        pygame.draw.circle(surface, (0, 255, 0), (int(screen_feet_x), int(screen_feet_y)), 5)
+                        pygame.draw.circle(surface, (0, 100, 0), (int(screen_feet_x), int(screen_feet_y)), 5, 1)
+                    else:
+                        # Fallback: draw at sprite position
+                        pygame.draw.circle(surface, (0, 255, 0), (int(npc_x), int(npc_y)), 5)
+                        pygame.draw.circle(surface, (0, 100, 0), (int(npc_x), int(npc_y)), 5, 1)
+                
+                # Draw NPC state above character
+                if DEBUG_DRAW and hasattr(obj, 'state_machine'):
+                    state_name = obj.state_machine.get_current_state_name()
+                    if state_name:
+                        state_text = self.font.render(state_name, True, (255, 255, 0))
+                        text_x = npc_x + (obj.sprite.get_width() // 2 if obj.sprite else 20) - (state_text.get_width() // 2)
+                        text_y = npc_y
+                        surface.blit(state_text, (text_x, text_y))
 
             elif obj_type == 'prop':
                 obj.draw(surface, camera=self.camera)
@@ -706,3 +807,49 @@ class MaskedScene:
             self.game.stack.push(scene_class(self.game, spawn=spawn))
         else:
             print(f"Warning: Scene '{target_scene_name}' not found in registry")
+    
+    def trigger_npc_portal_transition(self, npc: NPC, portal_id: int) -> None:
+        """Handle NPC transition through a portal to another scene.
+        
+        This moves the NPC to the next scene in their cross-scene path.
+        """
+        from scenes.scene_registry import get_scene_class
+        
+        portal_config = self.PORTAL_MAP.get(portal_id)
+        if not portal_config:
+            print(f"Warning: No portal config for portal {portal_id}")
+            return
+        
+        target_scene_name = portal_config.get("to_scene")
+        spawn = portal_config.get("spawn", (self.world_width // 2, self.world_height // 2))
+        
+        # Remove NPC from current scene
+        if npc in self.npcs:
+            self.npcs.remove(npc)
+            print(f"Removed NPC from current scene")
+        
+        # Update world registry to track NPC's new location AND position
+        from world.world_registry import move_npc_to_scene
+        move_npc_to_scene(getattr(npc, 'npc_id', 'unknown'), target_scene_name)
+        
+        # Update NPC's actual position to the spawn point in the new scene
+        # Spawn coordinates are in feet coordinates, convert to sprite coordinates
+        # using the NPC's collision mask offset (same as in NPC.__init__)
+        if hasattr(npc, 'mask_offset_x') and hasattr(npc, 'mask_offset_y'):
+            scaled_offset_x = int(npc.mask_offset_x * npc.sprite_scale)
+            scaled_offset_y = int(npc.mask_offset_y * npc.sprite_scale)
+            npc.x = spawn[0] - scaled_offset_x
+            npc.y = spawn[1] - scaled_offset_y
+        else:
+            npc.x = spawn[0]
+            npc.y = spawn[1]
+        
+        # Update rect if it exists
+        if hasattr(npc, 'rect'):
+            npc.rect.topleft = (npc.x, npc.y)
+        
+        print(f"NPC transitioning to scene '{target_scene_name}' via portal {portal_id}, spawning at {spawn}")
+        
+        # Clear transitioning flag so NPC can be loaded normally in the new scene
+        npc.transitioning = False
+

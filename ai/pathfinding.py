@@ -30,7 +30,8 @@ class Pathfinding:
         gscore = {start_c: 0}
 
         def neighbors(c):
-            for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
+            # 8-direction movement: cardinals + diagonals
+            for dx, dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)):
                 nx, ny = c[0]+dx, c[1]+dy
                 wx, wy = to_world((nx, ny))
                 if 0 <= wx < w and 0 <= wy < h and walkable_fn(wx, wy):
@@ -47,7 +48,10 @@ class Pathfinding:
                 path.reverse()
                 return [to_world(c) for c in path]
             for nb in neighbors(current):
-                tentative = gscore[current] + 1
+                # Diagonal moves cost more (sqrt(2) ≈ 1.414)
+                is_diagonal = (nb[0] != current[0]) and (nb[1] != current[1])
+                move_cost = 1.414 if is_diagonal else 1.0
+                tentative = gscore[current] + move_cost
                 if nb not in gscore or tentative < gscore[nb]:
                     came_from[nb] = current
                     gscore[nb] = tentative

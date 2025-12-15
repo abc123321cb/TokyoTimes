@@ -26,6 +26,10 @@ class Game:
         self.picked_up_items = set()  # Set of unique item IDs that have been picked up from their original locations
         self.dropped_items = {}  # Dict mapping scene_name -> list of dropped item data
 
+        # Initialize world with persistent NPCs and props
+        from world.world_registry import initialize_world
+        initialize_world(self)
+
         self.stack.push(TitleScene(self))
 
     def run(self):

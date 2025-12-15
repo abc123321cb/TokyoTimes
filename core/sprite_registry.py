@@ -9,7 +9,7 @@ SPRITE_REGISTRY = {
         "rows": 3,
         "cols": 3,
         "variants": 1,
-        "scale": 1.0,
+        "scale": 0.5,
     },
     "npc_henry": {
         "path": "sprites/henry.png",
@@ -18,7 +18,7 @@ SPRITE_REGISTRY = {
         "rows": 3,
         "cols": 3,
         "variants": 1,
-        "scale": 1.0,
+        "scale": 0.5,
     },
 
     # Props with horizontal variants

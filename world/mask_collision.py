@@ -47,6 +47,12 @@ class MaskCollisionSystem:
                     return portal_id
         return None
     
+    def point_in_portal(self, x: int, y: int, portal_id: int) -> bool:
+        """Check if a specific point is in a specific portal region."""
+        if portal_id not in self.portal_regions:
+            return False
+        return (int(x), int(y)) in self.portal_regions[portal_id]
+    
     def rect_collides(self, rect: pygame.Rect) -> bool:
         """Check if a rect collides with non-walkable areas (transparent/colored).
         Samples corners and center of the rect.
