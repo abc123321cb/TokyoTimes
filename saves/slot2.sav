@@ -3,17 +3,27 @@
     "scene": "cat_cafe",
     "room": "cat_cafe",
     "player": {
-      "x": 639.1999999999997,
-      "y": 484.2999999999999,
-      "direction": "right",
-      "inventory": []
+      "x": 740.7,
+      "y": 514.4,
+      "direction": "left",
+      "inventory": [
+        {
+          "name": "cat_food_dish",
+          "description": "A dish of cat food",
+          "type": "food",
+          "sprite": "props/cat_food_dish.png",
+          "variant_index": 0,
+          "variants": 3,
+          "scale": 2.0
+        }
+      ]
     },
     "world": {
       "npcs": [
         {
           "id": "henry",
-          "x": 299,
-          "y": 373,
+          "x": 491.44552587426415,
+          "y": 367.9767796986357,
           "direction": "up",
           "npc_type": "henry",
           "scene": "cat_cafe"
@@ -55,20 +65,11 @@
         }
       ]
     },
-    "dropped_items": {
-      "cat_cafe_kitchen": [
-        {
-          "name": "cat_food_dish",
-          "x": 935,
-          "y": 643,
-          "variant_index": 0,
-          "scale": 2.0
-        }
-      ]
-    },
+    "dropped_items": {},
     "picked_up_items": [
       "cat_food_dish"
-    ]
+    ],
+    "selected_inventory_slot": 1
   },
   "knowledge": {
     "seen_intro": true

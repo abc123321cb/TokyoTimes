@@ -19,6 +19,7 @@ class SaveSystem:
                 break
 
         player_state = {}
+        selected_inventory_slot = 0
         if player:
             player_state = {
                 "x": getattr(player, "x", 0),
@@ -26,6 +27,11 @@ class SaveSystem:
                 "direction": getattr(player, "direction", "down"),
                 "inventory": list(getattr(getattr(player, "inventory", None), "items", [])),
             }
+        # Get the current scene's selected inventory slot
+        for scene in game.stack._stack:
+            if hasattr(scene, "selected_inventory_slot"):
+                selected_inventory_slot = scene.selected_inventory_slot
+                break
 
         # Capture persistent world objects
         from world import world_registry
@@ -39,6 +45,7 @@ class SaveSystem:
             "world": world_state,
             "dropped_items": game.dropped_items,
             "picked_up_items": list(getattr(game, "picked_up_items", set())),
+            "selected_inventory_slot": selected_inventory_slot,
         }
 
     def apply_run_state(self, game, run_state: dict) -> None:
@@ -54,20 +61,22 @@ class SaveSystem:
 
         world_registry.apply_world_state(run_state.get("world", {}), game)
 
-        # Restore player basics if present
+        # Restore player basics and inventory slot if present
         player_state = run_state.get("player", {})
+        selected_inventory_slot = run_state.get("selected_inventory_slot", 0)
         if player_state:
             applied = False
             for scene in game.stack._stack:
                 if hasattr(scene, "player") and scene.player:
-                    self.apply_player_state(scene.player, player_state)
+                    self.apply_player_state(scene.player, player_state, selected_inventory_slot)
                     applied = True
                     break
             if not applied:
                 # Store for later application after a new scene creates the player
                 game.pending_player_state = player_state
+                game.pending_inventory_slot = selected_inventory_slot
 
-    def apply_player_state(self, player, player_state: dict) -> None:
+    def apply_player_state(self, player, player_state: dict, selected_inventory_slot: int = 0) -> None:
         """Apply player-specific state onto an existing player instance."""
         if not player_state or not player:
             return
@@ -75,11 +84,14 @@ class SaveSystem:
         player.y = player_state.get("y", getattr(player, "y", 0))
         player.direction = player_state.get("direction", getattr(player, "direction", "down"))
         if hasattr(player, "inventory") and "inventory" in player_state:
-            player.inventory.items = list(player_state.get("inventory", []))
+            # Restore inventory list - preserve all slots including empty ones
+            saved_items = player_state.get("inventory", [])
+            player.inventory.items = list(saved_items) if saved_items else []
 
     def save(self, slot: str, run_state: dict, knowledge_state: dict) -> None:
         payload = {"run": run_state, "knowledge": knowledge_state}
-        (self.base / f"{slot}.sav").write_text(json.dumps(payload, indent=2))
+        # Save with None values preserved (null in JSON)
+        (self.base / f"{slot}.sav").write_text(json.dumps(payload, indent=2, default=str))
 
     def load(self, slot: str) -> tuple[dict, dict]:
         p = self.base / f"{slot}.sav"

@@ -28,7 +28,7 @@ class CatCafeKitchenScene(MaskedScene):
     
     def draw(self, surface: pygame.Surface) -> None:
         super().draw(surface)
-        surface.blit(self.font.render("Kitchen (ESC for inventory)", True, (255, 255, 255)), (8, 8))
+        surface.blit(self.font.render("Kitchen", True, (255, 255, 255)), (8, 8))
 
 
 # Register this scene

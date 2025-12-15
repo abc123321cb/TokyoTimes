@@ -62,6 +62,9 @@ class MaskedScene:
         self.scene_scale = self.SCENE_SCALE if self.SCENE_SCALE is not None else 1.0
         self.active_modal = None  # Holds modal state when an arcade is open
         self.current_interact_prop = None  # Cached interactable prop for this frame
+        self.selected_inventory_slot = 0  # Track which inventory slot is active (0-4)
+        self.hud_dragging_item = None  # Track which HUD slot is being dragged (0-4) or None
+        self.hud_drag_offset = (0, 0)  # Track mouse position during drag
         
         # Register this scene's portals with the scene graph
         if self.SCENE_NAME and self.PORTAL_MAP:
@@ -177,8 +180,15 @@ class MaskedScene:
         pending_state = getattr(self.game, "pending_player_state", None)
         if pending_state:
             if hasattr(self.game, "saves"):
-                self.game.saves.apply_player_state(self.player, pending_state)
+                pending_slot = getattr(self.game, "pending_inventory_slot", 0)
+                self.game.saves.apply_player_state(self.player, pending_state, pending_slot)
             self.game.pending_player_state = None
+        
+        # Restore inventory slot if it was saved
+        pending_slot = getattr(self.game, "pending_inventory_slot", None)
+        if pending_slot is not None:
+            self.selected_inventory_slot = pending_slot
+            self.game.pending_inventory_slot = None
         
         # Load props from world registry
         self._load_scene_props()
@@ -353,7 +363,7 @@ class MaskedScene:
             item_to_add = getattr(prop, 'item_data', {}).copy()
             if not item_to_add.get('name'):
                 item_to_add['name'] = getattr(prop, 'name', 'unknown_item')
-            # Store sprite path for inventory display
+            # Store sprite path for inventory display (not the object itself)
             if hasattr(prop, 'sprite_path') and prop.sprite_path:
                 item_to_add['sprite'] = prop.sprite_path
             # Store variant and scale info for when we drop it again
@@ -368,7 +378,28 @@ class MaskedScene:
                     item_to_add['scale'] = base_scale
                 else:
                     item_to_add['scale'] = prop.scale / (self.scene_scale or 1.0)
-            self.player.inventory.add_item(item_to_add)
+            # Add item to the selected inventory slot
+            inventory_items = self.player.inventory.items
+            
+            # Expand inventory list if needed to reach selected slot
+            while len(inventory_items) <= self.selected_inventory_slot:
+                inventory_items.append(None)
+            
+            # If slot is empty, place item there; otherwise append to first available slot
+            if inventory_items[self.selected_inventory_slot] is None:
+                inventory_items[self.selected_inventory_slot] = item_to_add
+            else:
+                # Slot is occupied, append to first available slot after selected
+                for i in range(self.selected_inventory_slot + 1, 5):
+                    if i >= len(inventory_items) or inventory_items[i] is None:
+                        while len(inventory_items) <= i:
+                            inventory_items.append(None)
+                        inventory_items[i] = item_to_add
+                        break
+                else:
+                    # No room in first 5 slots, append after
+                    inventory_items.append(item_to_add)
+            
             # Mark the prop as picked up so it doesn't show in the scene
             prop.picked_up = True
             
@@ -527,7 +558,7 @@ class MaskedScene:
         return (initial_x, initial_y)
     
     def handle_event(self, event: pygame.event.Event) -> None:
-        # If a modal is open, route inputs or close
+        # If a modal is open, route inputs or close (check before HUD interactions)
         if self.active_modal:
             if isinstance(self.active_modal, dict):
                 mtype = self.active_modal.get("type")
@@ -547,6 +578,62 @@ class MaskedScene:
                 if mtype == "generic" and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self.active_modal = None
                     return
+            return
+
+        # Handle HUD drag-and-drop (only when no modal is open)
+        if event.type == pygame.MOUSEMOTION:
+            if self.hud_dragging_item is not None:
+                self.hud_drag_offset = event.pos
+
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            BOX_SIZE = 60
+            BOX_PADDING = 8
+            HUD_Y = 50  # Must match the drawing position in _draw_inventory_hud
+            HUD_X = 10
+            
+            mx, my = event.pos
+            # Check if click is in HUD area
+            for slot in range(5):
+                box_x = HUD_X + slot * (BOX_SIZE + BOX_PADDING)
+                box_y = HUD_Y
+                if box_x <= mx <= box_x + BOX_SIZE and box_y <= my <= box_y + BOX_SIZE:
+                    # Start dragging this slot
+                    self.hud_dragging_item = slot
+                    self.hud_drag_offset = (mx, my)
+                    self.selected_inventory_slot = slot
+                    return
+
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            if self.hud_dragging_item is not None:
+                # Try to drop on a target HUD slot
+                BOX_SIZE = 60
+                BOX_PADDING = 8
+                HUD_Y = 50
+                HUD_X = 10
+                
+                mx, my = event.pos
+                # Check if dropped on a HUD slot
+                for slot in range(5):
+                    box_x = HUD_X + slot * (BOX_SIZE + BOX_PADDING)
+                    box_y = HUD_Y
+                    if box_x <= mx <= box_x + BOX_SIZE and box_y <= my <= box_y + BOX_SIZE:
+                        # Swap items between slots
+                        if self.player and hasattr(self.player, 'inventory'):
+                            inventory_items = self.player.inventory.items
+                            # Ensure inventory is large enough
+                            while len(inventory_items) <= max(self.hud_dragging_item, slot):
+                                inventory_items.append(None)
+                            # Swap
+                            inventory_items[self.hud_dragging_item], inventory_items[slot] = \
+                                inventory_items[slot], inventory_items[self.hud_dragging_item]
+                            self.selected_inventory_slot = slot
+                        break
+                
+                self.hud_dragging_item = None
+        
+        # Handle inventory slot selection (1-5 keys, only when no modal is open)
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
+            self.selected_inventory_slot = event.key - pygame.K_1
             return
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -795,6 +882,9 @@ class MaskedScene:
                             screen_x, screen_y = self.camera.apply(screen_rect.x, screen_rect.y)
                             pygame.draw.rect(surface, (255, 128, 0), (screen_x, screen_y, screen_rect.width, screen_rect.height), 2)
 
+        # Draw HUD inventory at top of screen
+        self._draw_inventory_hud(surface)
+        
         # Modal overlay
         if self.active_modal:
             overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -819,6 +909,116 @@ class MaskedScene:
                     surface.blit(title, (modal_x + 20, modal_y + 20))
                     hint = self.font.render("(ESC to close)", True, (180, 180, 180))
                     surface.blit(hint, (modal_x + 20, modal_y + 60))
+    
+    def _draw_inventory_hud(self, surface: pygame.Surface) -> None:
+        """Draw 5 inventory slots at the top of the screen."""
+        BOX_SIZE = 60
+        BOX_PADDING = 8
+        HUD_Y = 50  # Moved down to avoid overlapping with scene title
+        HUD_X = 10
+        
+        if not self.player or not hasattr(self.player, 'inventory'):
+            return
+        
+        inventory_items = self.player.inventory.items
+        
+        # Draw 5 slots
+        for slot in range(5):
+            box_x = HUD_X + slot * (BOX_SIZE + BOX_PADDING)
+            box_y = HUD_Y
+            
+            # Draw box background and border
+            pygame.draw.rect(surface, (40, 40, 40), (box_x, box_y, BOX_SIZE, BOX_SIZE))
+            
+            # Highlight selected slot
+            border_color = (255, 200, 0) if slot == self.selected_inventory_slot else (100, 100, 100)
+            border_width = 3 if slot == self.selected_inventory_slot else 2
+            pygame.draw.rect(surface, border_color, (box_x, box_y, BOX_SIZE, BOX_SIZE), border_width)
+            
+            # Draw item if slot has one
+            if slot < len(inventory_items) and inventory_items[slot] is not None:
+                item = inventory_items[slot]
+                
+                # Try to get item sprite
+                item_sprite = None
+                
+                # Check if sprite is already a Surface object
+                if hasattr(item, 'sprite') and item.sprite:
+                    item_sprite = item.sprite
+                elif isinstance(item, dict):
+                    sprite_data = item.get('sprite')
+                    # If sprite_data is a string path, load it
+                    if isinstance(sprite_data, str) and self.game and hasattr(self.game, 'assets'):
+                        try:
+                            # Load the full spritesheet
+                            full_sheet = self.game.assets.image(sprite_data)
+                            # Extract first variant
+                            variants = item.get('variants', 1)
+                            variant_index = item.get('variant_index', 0)
+                            
+                            # Use SpriteLoader to extract the variant
+                            from core.sprites import SpriteLoader
+                            loader = SpriteLoader(self.game.assets)
+                            item_sprite = loader.slice_variant(full_sheet, variants, variant_index)
+                        except:
+                            pass
+                    # If sprite_data is already a Surface, use it
+                    elif hasattr(sprite_data, 'get_width'):
+                        item_sprite = sprite_data
+                
+                if item_sprite:
+                    # Scale item sprite to fit in box
+                    scale_factor = min((BOX_SIZE - 4) / item_sprite.get_width(), 
+                                     (BOX_SIZE - 4) / item_sprite.get_height())
+                    scaled_width = int(item_sprite.get_width() * scale_factor)
+                    scaled_height = int(item_sprite.get_height() * scale_factor)
+                    scaled_sprite = pygame.transform.scale(item_sprite, (scaled_width, scaled_height))
+                    
+                    # Center in box
+                    item_x = box_x + (BOX_SIZE - scaled_width) // 2
+                    item_y = box_y + (BOX_SIZE - scaled_height) // 2
+                    surface.blit(scaled_sprite, (item_x, item_y))
+                else:
+                    # Fallback: draw a colored square
+                    inner_padding = 2
+                    pygame.draw.rect(surface, (150, 150, 100), 
+                                   (box_x + inner_padding, box_y + inner_padding, 
+                                    BOX_SIZE - 2*inner_padding, BOX_SIZE - 2*inner_padding))
+                
+                # Draw item count if > 1
+                if isinstance(item, dict) and item.get('quantity', 1) > 1:
+                    count_text = self.font.render(str(item['quantity']), True, (255, 255, 255))
+                    surface.blit(count_text, (box_x + BOX_SIZE - 18, box_y + BOX_SIZE - 18))
+            
+            # Draw slot number (1-5) in bottom right
+            slot_num_font = pygame.font.Font(None, 16)
+            slot_num = slot_num_font.render(str(slot + 1), True, (200, 200, 200))
+            surface.blit(slot_num, (box_x + BOX_SIZE - 16, box_y + BOX_SIZE - 14))
+        
+        # Draw dragged item preview if dragging
+        if self.hud_dragging_item is not None:
+            dragging_slot = self.hud_dragging_item
+            if dragging_slot < len(inventory_items) and inventory_items[dragging_slot] is not None:
+                dragging_item = inventory_items[dragging_slot]
+                # Get sprite for dragging preview
+                drag_sprite = None
+                if isinstance(dragging_item, dict):
+                    sprite_data = dragging_item.get('sprite')
+                    if isinstance(sprite_data, str) and self.game and hasattr(self.game, 'assets'):
+                        try:
+                            full_sheet = self.game.assets.image(sprite_data)
+                            variants = dragging_item.get('variants', 1)
+                            variant_index = dragging_item.get('variant_index', 0)
+                            from core.sprites import SpriteLoader
+                            loader = SpriteLoader(self.game.assets)
+                            drag_sprite = loader.slice_variant(full_sheet, variants, variant_index)
+                        except:
+                            pass
+                
+                if drag_sprite:
+                    # Draw at full size at mouse position
+                    mouse_x, mouse_y = self.hud_drag_offset
+                    surface.blit(drag_sprite, (mouse_x - drag_sprite.get_width() // 2, mouse_y - drag_sprite.get_height() // 2))
     
     def _enter_portal(self, portal_id: int) -> None:
         """Handle portal transition using scene registry."""
