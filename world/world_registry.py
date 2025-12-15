@@ -41,7 +41,6 @@ def initialize_world(game) -> None:
         npc.npc_type = npc_def.get('type', 'henry')
         _npcs[npc_id] = npc
         _npc_locations[npc_id] = npc_def['initial_scene']
-        print(f"World: Initialized NPC '{npc_id}' for scene '{npc_def['initial_scene']}'")
     
     # Create all props
     from world.world_props import PROPS_DEFINITION
@@ -64,7 +63,6 @@ def initialize_world(game) -> None:
         prop.prop_id = prop_id
         _props[prop_id] = prop
         _prop_locations[prop_id] = prop_def['initial_scene']
-        print(f"World: Initialized prop '{prop_id}' for scene '{prop_def['initial_scene']}'")
 
 
 def get_npc(npc_id: str) -> Optional[NPC]:
@@ -81,7 +79,6 @@ def get_npcs_in_scene(scene_name: str) -> List[NPC]:
     """Get all NPCs currently in a scene."""
     npcs = [_npcs[npc_id] for npc_id in _npc_locations 
             if _npc_locations[npc_id] == scene_name and npc_id in _npcs]
-    print(f"World: Found {len(npcs)} NPCs in scene '{scene_name}' (total NPCs: {len(_npcs)}, locations: {_npc_locations})")
     return npcs
 
 
@@ -89,7 +86,6 @@ def get_props_in_scene(scene_name: str) -> List[Prop]:
     """Get all props currently in a scene."""
     props = [_props[prop_id] for prop_id in _prop_locations 
             if _prop_locations[prop_id] == scene_name and prop_id in _props]
-    print(f"World: Found {len(props)} props in scene '{scene_name}' (total props: {len(_props)}, locations: {_prop_locations})")
     return props
 
 
@@ -195,6 +191,17 @@ def apply_world_state(state: dict, game) -> None:
 
         if prop_state.get("scene"):
             _prop_locations[prop_id] = prop_state["scene"]
+
+
+def update_all_npcs(dt: float, game) -> None:
+    """Update all NPCs globally regardless of which scene they're in.
+    
+    This ensures NPCs continue to advance their state machines (idle/wander/travel)
+    even when they're not in the currently-active scene.
+    """
+    for npc_id, npc in _npcs.items():
+        if npc and hasattr(npc, "update"):
+            npc.update(dt)
 
 
 def remove_npc(npc_id: str) -> None:

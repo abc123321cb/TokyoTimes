@@ -20,6 +20,8 @@ class Prop:
         self.y = y
         self.name = name
         self.game = game
+        self.sprite_path = sprite_path  # Store for inventory display
+        self.mask_path = mask_path
         self.scene_scale = max(0.1, float(scene_scale)) if scene_scale is not None else 1.0
         self.base_scale = max(0.1, float(scale)) if scale is not None else 1.0
         # Combined scale applies item-level scaling and scene-level scaling together

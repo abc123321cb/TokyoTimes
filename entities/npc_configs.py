@@ -13,6 +13,7 @@ class NPCConfig:
         travel_probability: float = 0.10,
         # Idle again probability is calculated as: 1 - wander - travel
         # Wander state settings
+        wander_min_distance: float = 50.0,
         wander_radius: float = 200.0,
         wander_portal_min_distance: float = 50.0,
         max_wander_time: float = 10.0,
@@ -30,6 +31,7 @@ class NPCConfig:
         self.travel_probability = travel_probability
         self.idle_again_probability = 1.0 - wander_probability - travel_probability
         # Wander settings
+        self.wander_min_distance = wander_min_distance
         self.wander_radius = wander_radius
         self.wander_portal_min_distance = wander_portal_min_distance
         self.max_wander_time = max_wander_time

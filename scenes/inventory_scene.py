@@ -209,9 +209,17 @@ class InventoryScene:
                     item_sprite = None
                     if sprite_path and self.game and hasattr(self.game, 'assets'):
                         try:
-                            item_sprite = self.game.assets.image(sprite_path)
-                            # Scale down for inventory display
-                            scale = 0.3
+                            from core.sprites import SpriteLoader
+                            full_sheet = self.game.assets.image(sprite_path)
+                            loader = SpriteLoader(self.game.assets)
+                            
+                            # Extract first variant only
+                            variants = item.get("variants", 1)
+                            variant_index = item.get("variant_index", 0)
+                            item_sprite = loader.slice_variant(full_sheet, variants, variant_index)
+                            
+                            # Scale larger for inventory display
+                            scale = 0.5
                             scaled_w = max(1, int(item_sprite.get_width() * scale))
                             scaled_h = max(1, int(item_sprite.get_height() * scale))
                             item_sprite = pygame.transform.scale(item_sprite, (scaled_w, scaled_h))

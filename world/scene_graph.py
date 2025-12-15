@@ -110,3 +110,19 @@ def get_scene_graph() -> SceneGraph:
 def register_scene_portals(scene_name: str, portal_map: dict):
     """Register a scene's portals with the global scene graph."""
     _scene_graph.register_scene(scene_name, portal_map)
+
+
+def populate_scene_graph_from_registry():
+    """Build the complete portal map by scanning all registered scenes.
+    
+    This should be called at game startup to ensure all scenes have their portals
+    registered in the scene graph, even if they haven't been instantiated yet.
+    This allows off-screen NPCs to find valid travel routes.
+    """
+    from scenes.scene_registry import SCENE_REGISTRY
+    
+    for scene_name, scene_class in SCENE_REGISTRY.items():
+        # Get PORTAL_MAP from scene class definition
+        portal_map = getattr(scene_class, 'PORTAL_MAP', {})
+        if portal_map:
+            _scene_graph.register_scene(scene_name, portal_map)

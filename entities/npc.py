@@ -73,7 +73,6 @@ class NPC(Character):
                             # This will be our reference point (feet position)
                             self.mask_offset_x = collision_box.x + (collision_box.width // 2)
                             self.mask_offset_y = collision_box.y + collision_box.height
-                            print(f"Loaded collision mask for NPC Henry - offset: ({self.mask_offset_x}, {self.mask_offset_y})")
                 except Exception as e:
                     print(f"Warning: Could not load NPC collision mask: {e}")
             except Exception as e:
@@ -124,6 +123,16 @@ class NPC(Character):
         self.target_scene = None  # Target scene name for cross-scene movement
         self.scene_path = None  # List of (scene_name, portal_id, spawn_point) for cross-scene path
         self.current_scene_step = 0  # Which step in the scene path we're on
+        # Cache for off-screen mask sampling per scene
+        self.offscreen_mask_cache = {}
+    
+    def log_state_change(self, new_state: str) -> None:
+        """Log when this NPC changes state."""
+        npc_name = getattr(self, 'npc_id', 'Unknown')
+        # Get scene from world registry (more up-to-date than npc.scene)
+        from world.world_registry import get_npc_location
+        scene_name = get_npc_location(npc_name) or 'Unknown'
+
 
     def _create_animation(self, frame_indices: list) -> Animation:
         anim = Animation(self.spritesheet, fps=6, scale=self.sprite_scale)
@@ -215,13 +224,13 @@ class NPC(Character):
                     
                     # Only transition if we're at the expected portal or path is complete
                     if expected_portal_id == portal_id or (not self.path or self.current_waypoint_idx >= len(self.path)):
-                        print(f"NPC reached portal {portal_id} (intentional), requesting scene transition")
+                        #print(f"NPC reached portal {portal_id} (intentional), requesting scene transition")
                         if hasattr(self.scene, 'trigger_npc_portal_transition'):
                             self.scene.trigger_npc_portal_transition(self, portal_id)
                         self.current_scene_step += 1
                 else:
                     # Unintentional portal entry (e.g., wandering too close)
-                    print(f"NPC accidentally entered portal {portal_id}, triggering scene transition")
+                    #print(f"NPC accidentally entered portal {portal_id}, triggering scene transition")
                     if hasattr(self.scene, 'trigger_npc_portal_transition'):
                         self.scene.trigger_npc_portal_transition(self, portal_id)
                     # Clear current path since we're leaving the scene
@@ -241,7 +250,7 @@ class NPC(Character):
             if distance_moved < 1.0:  # Less than 1 pixel moved
                 self.stuck_timer += dt
                 if self.stuck_timer > 0.5:  # Stuck for more than 0.5 seconds
-                    print(f"NPC stuck, re-pathfinding to {self.destination}")
+                    print(f"  NPC stuck, re-pathfinding to {self.destination}")
                     self.pathfind_to(self.destination[0], self.destination[1])
                     self.stuck_timer = 0.0
             else:
@@ -291,12 +300,15 @@ class NPC(Character):
             target_y: Target Y coordinate
             avoid_portals: If True, portals are treated as unwalkable (for same-scene wandering)
         """
+        npc_name = getattr(self, 'npc_id', '?')
         if not self.mask_system:
-            print("Warning: NPC has no mask_system, cannot pathfind")
+            print(f"    [pathfind_to] {npc_name}: No mask_system, cannot pathfind")
             return
         
         # Get current feet position for pathfinding
         start_x, start_y = self._get_feet_position()
+        
+        #print(f"    [pathfind_to] {npc_name}: from ({int(start_x)}, {int(start_y)}) to ({int(target_x)}, {int(target_y)}), avoid_portals={avoid_portals}")
         
         # Store destination for re-pathfinding
         self.destination = (target_x, target_y)
@@ -370,11 +382,13 @@ class NPC(Character):
             (world_width, world_height)
         )
         self.current_waypoint_idx = 0
+        """
         if self.path:
             print(f"NPC pathfinding from ({start_x}, {start_y}) to ({target_x}, {target_y}): found {len(self.path)} waypoints")
         else:
             print(f"NPC pathfinding from ({start_x}, {start_y}) to ({target_x}, {target_y}): no path found")
-    
+        """
+
     def pathfind_to_scene(self, target_scene: str, target_x: float = None, target_y: float = None):
         """Pathfind to a location in a different scene (or current scene).
         
@@ -383,14 +397,25 @@ class NPC(Character):
             target_x: X coordinate in target scene (optional, uses scene center if not provided)
             target_y: Y coordinate in target scene (optional, uses scene center if not provided)
         """
-        if not hasattr(self, 'scene') or not self.scene:
-            print("Warning: NPC has no scene reference, cannot do cross-scene pathfinding")
-            return
+        npc_name = getattr(self, 'npc_id', '?')
+        # Get current scene from world registry (more reliable than self.scene)
+        from world.world_registry import get_npc_location
+        current_scene = get_npc_location(npc_name)
         
-        current_scene = self.scene.scene_name
+        #print(f"    [pathfind_to_scene] {npc_name}: from {current_scene} to {target_scene}")
+        
+        if not current_scene:
+            # Fallback to self.scene if registry lookup fails
+            if hasattr(self, 'scene') and self.scene:
+                current_scene = self.scene.scene_name
+                print(f"      Fell back to self.scene: {current_scene}")
+            else:
+                print(f"      No scene reference, aborting cross-scene pathfinding")
+                return
         
         # If target is current scene, just pathfind normally
         if target_scene == current_scene:
+            print(f"      Target is same scene, doing local pathfind")
             if target_x is not None and target_y is not None:
                 self.pathfind_to(target_x, target_y)
             return
@@ -399,18 +424,44 @@ class NPC(Character):
         scene_graph = get_scene_graph()
         scene_path = scene_graph.find_scene_path(current_scene, target_scene)
         
+        print(f"      Scene graph path: {[s[0] for s in scene_path] if scene_path else 'None'}")
+        
         if not scene_path:
-            print(f"Warning: No path found from scene '{current_scene}' to '{target_scene}'")
+            print(f"      No path found from scene '{current_scene}' to '{target_scene}'")
             return
         
-        print(f"NPC cross-scene path from {current_scene} to {target_scene}: {scene_path}")
+        #print(f"NPC cross-scene path from {current_scene} to {target_scene}: {scene_path}")
         
         # Store the scene path and final destination
         self.target_scene = target_scene
         self.scene_path = scene_path
         self.current_scene_step = 0
         
-        # Start by pathfinding to the first portal in current scene
+        # If we lack a mask/system (off-screen), fast-forward one scene hop using graph spawn
+        if (not self.mask_system or not getattr(self, 'scene', None)) and len(scene_path) > 1:
+            first_step = scene_path[0]
+            next_step = scene_path[1]
+            portal_spawn = first_step[2]
+            next_scene = next_step[0]
+            print(f"      Off-screen: fast-forward hop {first_step[0]} -> {next_scene} at spawn {portal_spawn}")
+            try:
+                from world.world_registry import move_npc_to_scene
+                move_npc_to_scene(npc_name, next_scene)
+                if hasattr(self, 'mask_offset_x') and hasattr(self, 'mask_offset_y') and portal_spawn:
+                    scaled_offset_x = int(self.mask_offset_x * self.sprite_scale)
+                    scaled_offset_y = int(self.mask_offset_y * self.sprite_scale)
+                    self.x = portal_spawn[0] - scaled_offset_x
+                    self.y = portal_spawn[1] - scaled_offset_y
+                elif portal_spawn:
+                    self.x, self.y = portal_spawn
+                # Trim the scene_path to continue from the new scene
+                self.scene_path = scene_path[1:]
+                self.current_scene_step = 0
+            except Exception as e:
+                print(f"      Fast-forward failed: {e}")
+            return
+        
+        # Start by pathfinding to the first portal in current scene (when mask is available)
         if len(scene_path) > 1:
             first_step = scene_path[0]
             portal_id = first_step[1]
@@ -422,7 +473,6 @@ class NPC(Character):
                     # Pathfind to center of portal
                     portal_center_x = portal_bounds.centerx
                     portal_center_y = portal_bounds.centery
-                    print(f"NPC pathfinding to portal {portal_id} at ({portal_center_x}, {portal_center_y})")
                     # Don't avoid portals when intentionally trying to reach one
                     self.pathfind_to(portal_center_x, portal_center_y, avoid_portals=False)
     
@@ -434,16 +484,21 @@ class NPC(Character):
                 # Continue moving toward portal center even if path is complete
                 current_step = self.scene_path[self.current_scene_step]
                 portal_id = current_step[1]
-                print(f"DEBUG: Path complete, checking portal entry. scene_path={self.scene_path}, step={self.current_scene_step}, portal_id={portal_id}")
                 
-                if portal_id is not None and self.mask_system:
+                # If portal_id is None, we've reached the final destination scene
+                if portal_id is None:
+                    self.scene_path = None
+                    self.target_scene = None
+                    self.path = []
+                    self.current_waypoint_idx = 0
+                    return
+                
+                if self.mask_system:
                     feet_x, feet_y = self._get_feet_position()
-                    print(f"DEBUG: NPC feet at ({feet_x:.1f}, {feet_y:.1f}), checking portal {portal_id}")
                     
                     # Check if we're in the portal yet
                     if self.mask_system.point_in_portal(int(feet_x), int(feet_y), portal_id):
                         # We're in the portal, stop moving
-                        print(f"NPC feet entered portal {portal_id} at ({int(feet_x)}, {int(feet_y)})")
                         self.path = []
                         self.current_waypoint_idx = 0
                         return
@@ -453,7 +508,6 @@ class NPC(Character):
                     if portal_bounds:
                         portal_center_x = portal_bounds.centerx
                         portal_center_y = portal_bounds.centery
-                        print(f"DEBUG: Portal {portal_id} center at ({portal_center_x}, {portal_center_y}), NPC feet at ({feet_x:.1f}, {feet_y:.1f})")
                         
                         dx = portal_center_x - feet_x
                         dy = portal_center_y - feet_y
@@ -468,15 +522,12 @@ class NPC(Character):
                             
                             move_distance = self.speed * dt
                             if move_distance >= distance:
-                                print(f"DEBUG: Reached portal center, setting position")
                                 self._set_position_from_feet(portal_center_x, portal_center_y)
                             else:
                                 new_feet_x = feet_x + (dx / distance) * move_distance
                                 new_feet_y = feet_y + (dy / distance) * move_distance
                                 self._set_position_from_feet(new_feet_x, new_feet_y)
                             return
-            else:
-                print(f"DEBUG: Path complete, no scene_path or step complete. scene_path={self.scene_path}, step={self.current_scene_step if self.scene_path else 'N/A'}")
             
             self.path = []
             self.current_waypoint_idx = 0

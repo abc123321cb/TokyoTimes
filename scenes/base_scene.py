@@ -79,10 +79,6 @@ class MaskedScene:
         try:
             mask_img = game.assets.image(mask_path)
             self.mask_system = MaskCollisionSystem(mask_img)
-            print(f"Loaded mask for {self.BACKGROUND_PATH}: {len(self.mask_system.portal_regions)} portal regions")
-            for pid in self.mask_system.portal_regions:
-                bounds = self.mask_system.get_portal_bounds(pid)
-                print(f"  Portal {pid}: {bounds}")
         except Exception as e:
             print(f"Warning: Could not load mask {mask_path}: {e}")
             self.mask_system = None
@@ -218,7 +214,6 @@ class MaskedScene:
             # Don't re-add if already in the list
             if prop not in self.props:
                 self.props.append(prop)
-                print(f"Loaded prop {getattr(prop, 'prop_id', 'unknown')} to {self.scene_name}")
         
         # Spawn any dropped items for this scene
         if self.scene_name in self.game.dropped_items:
@@ -249,10 +244,32 @@ class MaskedScene:
         npcs_in_scene = get_npcs_in_scene(self.scene_name)
         
         for npc in npcs_in_scene:
-            # Update NPC's scene reference and systems
+            # Update NPC's scene reference and systems (always, even if already in list)
             npc.scene = self
             npc.mask_system = self.mask_system
             npc.props = self.props
+
+            # If position is not walkable (e.g., off-screen warp), snap to nearest walkable spot
+            if npc.mask_system:
+                feet_x, feet_y = npc._get_feet_position()
+                if not npc.mask_system.is_walkable(int(feet_x), int(feet_y)):
+                    found = False
+                    for radius in range(20, 141, 20):  # search up to ~140px
+                        for dx in range(-radius, radius + 1, 20):
+                            for dy in range(-radius, radius + 1, 20):
+                                test_x = feet_x + dx
+                                test_y = feet_y + dy
+                                if npc.mask_system.is_walkable(int(test_x), int(test_y)):
+                                    npc._set_position_from_feet(test_x, test_y)
+                                    if hasattr(npc, 'rect'):
+                                        npc.rect.topleft = (npc.x, npc.y)
+                                    print(f"NPC {getattr(npc, 'npc_id', 'unknown')} snapped to walkable ({int(test_x)}, {int(test_y)}) in {self.scene_name}")
+                                    found = True
+                                    break
+                            if found:
+                                break
+                        if found:
+                            break
             
             # Update NPC's scene-level scaling if it changed
             old_combined_scale = npc.sprite_scale
@@ -270,31 +287,35 @@ class MaskedScene:
                 npc.moving_animations["right"] = npc._create_animation([6, 7, 6, 8])
                 npc.moving_animations["left"] = npc._create_animation_mirrored([6, 7, 6, 8])
             
-            # Don't re-add if already in the list
-            if npc not in self.npcs:
+            # Add to scene if not already present
+            is_new_to_scene = npc not in self.npcs
+            if is_new_to_scene:
                 self.npcs.append(npc)
-                print(f"Loaded NPC {getattr(npc, 'npc_id', 'unknown')} to {self.scene_name}")
-                
-                # Continue cross-scene pathfinding if applicable
-                if npc.scene_path and npc.current_scene_step < len(npc.scene_path):
-                    next_step = npc.scene_path[npc.current_scene_step]
-                    if next_step[0] == self.scene_name:
-                        # We're in the right scene, continue to next portal or destination
-                        if npc.current_scene_step + 1 < len(npc.scene_path):
-                            # Path to next portal
-                            next_portal_step = npc.scene_path[npc.current_scene_step]
-                            next_portal_id = next_portal_step[1]
-                            if next_portal_id is not None:
-                                portal_bounds = self.mask_system.get_portal_bounds(next_portal_id)
-                                if portal_bounds:
-                                    portal_center_x = portal_bounds.centerx
-                                    portal_center_y = portal_bounds.centery
-                                    # Don't avoid portals when intentionally trying to reach one
-                                    npc.pathfind_to(portal_center_x, portal_center_y, avoid_portals=False)
-                        else:
-                            # Reached final scene
-                            npc.scene_path = None
-                            npc.target_scene = None
+                print(f"Added {getattr(npc, 'npc_id', 'unknown')} to scene {self.scene_name}")
+            
+            # Continue cross-scene pathfinding if applicable (regardless of whether newly added)
+            if npc.scene_path and npc.current_scene_step < len(npc.scene_path):
+                npc_name = getattr(npc, 'npc_id', 'unknown')
+                next_step = npc.scene_path[npc.current_scene_step]
+                print(f"NPC {npc_name} has scene_path, checking if {next_step[0]} == {self.scene_name}")
+                if next_step[0] == self.scene_name:
+                    # We're in the right scene, continue to next portal or destination
+                    if npc.current_scene_step + 1 < len(npc.scene_path):
+                        # Path to next portal
+                        next_portal_step = npc.scene_path[npc.current_scene_step]
+                        next_portal_id = next_portal_step[1]
+                        print(f"  Resuming travel in {self.scene_name}, pathfinding to portal {next_portal_id}")
+                        if next_portal_id is not None:
+                            portal_bounds = self.mask_system.get_portal_bounds(next_portal_id)
+                            if portal_bounds:
+                                portal_center_x = portal_bounds.centerx
+                                portal_center_y = portal_bounds.centery
+                                # Don't avoid portals when intentionally trying to reach one
+                                npc.pathfind_to(portal_center_x, portal_center_y, avoid_portals=False)
+                    else:
+                        # Reached final scene
+                        #print(f"  {npc_name} reached final destination scene {self.scene_name}")
+                        npc.scene_path = None
     
     def _get_mask_path(self, background_path: str) -> str:
         """Convert background path to mask path by inserting '_mask' before extension."""
@@ -333,9 +354,14 @@ class MaskedScene:
             item_to_add = getattr(prop, 'item_data', {}).copy()
             if not item_to_add.get('name'):
                 item_to_add['name'] = getattr(prop, 'name', 'unknown_item')
-            # Store variant info and scale for when we drop it again
+            # Store sprite path for inventory display
+            if hasattr(prop, 'sprite_path') and prop.sprite_path:
+                item_to_add['sprite'] = prop.sprite_path
+            # Store variant and scale info for when we drop it again
             if hasattr(prop, 'variant_index'):
                 item_to_add['variant_index'] = prop.variant_index
+            if hasattr(prop, 'variants'):
+                item_to_add['variants'] = prop.variants
             if hasattr(prop, 'scale'):
                 # Store item-level scale only; scene scale is applied on spawn
                 base_scale = getattr(prop, 'base_scale', None)
@@ -496,7 +522,7 @@ class MaskedScene:
                 test_y = initial_y + step * math.sin(angle_rad)
                 
                 if is_valid_drop_location(test_x, test_y):
-                    print(f"Found valid drop location at ({test_x:.0f}, {test_y:.0f}) after {attempt} attempts")
+                    #print(f"Found valid drop location at ({test_x:.0f}, {test_y:.0f}) after {attempt} attempts")
                     return (test_x, test_y)
         
         # Fallback: return initial position even if invalid (shouldn't happen in normal play)
@@ -824,7 +850,7 @@ class MaskedScene:
         
         portal_config = self.PORTAL_MAP.get(portal_id)
         if not portal_config:
-            print(f"Warning: No portal config for portal {portal_id}")
+            print(f"Warning: No portal config for portal {portal_id} in scene {self.scene_name}")
             return
         
         target_scene_name = portal_config.get("to_scene")
@@ -833,7 +859,6 @@ class MaskedScene:
         # Remove NPC from current scene
         if npc in self.npcs:
             self.npcs.remove(npc)
-            print(f"Removed NPC from current scene")
         
         # Update world registry to track NPC's new location AND position
         from world.world_registry import move_npc_to_scene
@@ -847,15 +872,82 @@ class MaskedScene:
             scaled_offset_y = int(npc.mask_offset_y * npc.sprite_scale)
             npc.x = spawn[0] - scaled_offset_x
             npc.y = spawn[1] - scaled_offset_y
+            #print(f"NPC spawn: feet={spawn}, offset=({scaled_offset_x},{scaled_offset_y}), sprite pos=({npc.x},{npc.y})")
         else:
             npc.x = spawn[0]
             npc.y = spawn[1]
+            #print(f"NPC spawn (no offset): {spawn}")
         
         # Update rect if it exists
         if hasattr(npc, 'rect'):
             npc.rect.topleft = (npc.x, npc.y)
         
-        print(f"NPC transitioning to scene '{target_scene_name}' via portal {portal_id}, spawning at {spawn}")
+        # If the target scene is currently active, add the NPC to it immediately
+        if hasattr(self.game, 'stack') and self.game.stack.top():
+            active_scene = self.game.stack.top()
+            if (hasattr(active_scene, 'scene_name') and 
+                active_scene.scene_name == target_scene_name and
+                hasattr(active_scene, 'npcs')):
+                # Add NPC to the active scene
+                if npc not in active_scene.npcs:
+                    active_scene.npcs.append(npc)
+                    # Update NPC's scene reference and systems
+                    npc.scene = active_scene
+                    npc.mask_system = active_scene.mask_system
+                    npc.props = active_scene.props
+                else:
+                    # Ensure references are up to date even if already present
+                    npc.scene = active_scene
+                    npc.mask_system = active_scene.mask_system
+                    npc.props = active_scene.props
+                    
+                    # Verify spawn point is walkable; if not, find nearby walkable spot
+                    if npc.mask_system:
+                        feet_x, feet_y = npc._get_feet_position()
+                        if not npc.mask_system.is_walkable(int(feet_x), int(feet_y)):
+                            print(f"NPC spawn at ({int(feet_x)}, {int(feet_y)}) not walkable, searching nearby...")
+                            found = False
+                            for offset_x in range(-100, 101, 20):
+                                for offset_y in range(-100, 101, 20):
+                                    test_x = feet_x + offset_x
+                                    test_y = feet_y + offset_y
+                                    if npc.mask_system.is_walkable(int(test_x), int(test_y)):
+                                        # Move NPC to this walkable position
+                                        if hasattr(npc, 'mask_offset_x') and hasattr(npc, 'mask_offset_y'):
+                                            scaled_offset_x = int(npc.mask_offset_x * npc.sprite_scale)
+                                            scaled_offset_y = int(npc.mask_offset_y * npc.sprite_scale)
+                                            npc.x = test_x - scaled_offset_x
+                                            npc.y = test_y - scaled_offset_y
+                                        else:
+                                            npc.x = test_x
+                                            npc.y = test_y
+                                        if hasattr(npc, 'rect'):
+                                            npc.rect.topleft = (npc.x, npc.y)
+                                            print(f"Moved NPC to walkable position ({int(test_x)}, {int(test_y)})")
+                                        found = True
+                                        break
+                                if found:
+                                    break
+                    
+                        feet_x, feet_y = npc._get_feet_position()
+                        print(f"Added NPC to active scene {target_scene_name} at ({int(feet_x)}, {int(feet_y)})")
+
+                        # If this was the final step of a scene_path, clear it
+                        if getattr(npc, 'scene_path', None) and getattr(npc, 'current_scene_step', 0) >= len(npc.scene_path) - 1:
+                            npc.scene_path = None
+                            npc.target_scene = None
+            else:
+                # Scene not active: clear immediate pathfinding but preserve scene_path for cross-scene travel
+                print(f"Target scene {target_scene_name} not yet active, deferring NPC setup to scene load")
+                npc.path = []
+                npc.destination = None
+                # Keep scene/mask_system/props cleared so state machine knows NPC is off-screen
+                # but DON'T clear scene_path - the NPC will resume travel when this scene loads
+                npc.scene = None
+                npc.mask_system = None
+                npc.props = []
+                # scene_path remains set, so when _load_scene_npcs() restores mask_system,
+                # the NPC can continue its cross-scene journey
         
         # Clear transitioning flag so NPC can be loaded normally in the new scene
         npc.transitioning = False

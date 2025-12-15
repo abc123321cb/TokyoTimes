@@ -80,7 +80,6 @@ class Player(Character):
                         frame_width=girl_cfg["frame_width"],
                         frame_height=girl_cfg["frame_height"]
                     )
-                    print("Loaded collision mask for player")
                 except Exception as e:
                     print(f"Warning: Could not load player collision mask: {e}")
             except Exception as e:
