@@ -103,10 +103,17 @@ class MaskedScene:
             self.npcs = []
         
         # Use default hitbox dimensions/offsets (player gets scale from sprite registry)
-        player_hitbox_width = self.PLAYER_HITBOX_WIDTH if self.PLAYER_HITBOX_WIDTH is not None else PLAYER_HITBOX_WIDTH
-        player_hitbox_height = self.PLAYER_HITBOX_HEIGHT if self.PLAYER_HITBOX_HEIGHT is not None else PLAYER_HITBOX_HEIGHT
-        player_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX if self.PLAYER_HITBOX_OFFSET_CENTERX is not None else PLAYER_HITBOX_OFFSET_CENTERX
-        player_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM if self.PLAYER_HITBOX_OFFSET_BOTTOM is not None else PLAYER_HITBOX_OFFSET_BOTTOM
+        base_hitbox_width = self.PLAYER_HITBOX_WIDTH if self.PLAYER_HITBOX_WIDTH is not None else PLAYER_HITBOX_WIDTH
+        base_hitbox_height = self.PLAYER_HITBOX_HEIGHT if self.PLAYER_HITBOX_HEIGHT is not None else PLAYER_HITBOX_HEIGHT
+        base_hitbox_offset_centerx = self.PLAYER_HITBOX_OFFSET_CENTERX if self.PLAYER_HITBOX_OFFSET_CENTERX is not None else PLAYER_HITBOX_OFFSET_CENTERX
+        base_hitbox_offset_bottom = self.PLAYER_HITBOX_OFFSET_BOTTOM if self.PLAYER_HITBOX_OFFSET_BOTTOM is not None else PLAYER_HITBOX_OFFSET_BOTTOM
+
+        # Scale hitbox and offsets with scene scale so feet land exactly on spawn points
+        scale_factor = self.scene_scale if self.scene_scale is not None else 1.0
+        player_hitbox_width = max(1, int(round(base_hitbox_width * scale_factor)))
+        player_hitbox_height = max(1, int(round(base_hitbox_height * scale_factor)))
+        player_hitbox_offset_centerx = int(round(base_hitbox_offset_centerx * scale_factor))
+        player_hitbox_offset_bottom = int(round(base_hitbox_offset_bottom * scale_factor))
         
         # Reuse existing player if available (preserves inventory across scenes)
         if hasattr(game, 'player') and game.player:
@@ -134,6 +141,9 @@ class MaskedScene:
             self.player.collision_rect.height = player_hitbox_height
             self.player.hitbox_offset_centerx = player_hitbox_offset_centerx
             self.player.hitbox_offset_bottom = player_hitbox_offset_bottom
+            # Scale player speed with scene scale
+            base_speed = getattr(self.player, 'base_speed', self.player.speed)
+            self.player.speed = base_speed * self.scene_scale
             # Update player position for spawn point
             if spawn:
                 sprite_x = spawn[0] - player_hitbox_offset_centerx
@@ -285,9 +295,22 @@ class MaskedScene:
             old_combined_scale = npc.sprite_scale
             npc.scene_scale = self.scene_scale
             npc.sprite_scale = npc.base_scale * npc.scene_scale
+            # Scale NPC movement speed with scene scale
+            base_speed = getattr(npc, 'base_speed', getattr(getattr(npc, 'config', None), 'speed', npc.speed))
+            npc.speed = base_speed * npc.scene_scale
+            # Update pathfinding cell size for scene scale
+            scaled_cell_size = max(5, int(20 * npc.scene_scale))
+            npc.pathfinder.cell = scaled_cell_size
             
-            # Recreate animations with new scale if combined scale changed
-            if npc.sprite_scale != old_combined_scale and hasattr(npc, 'spritesheet') and npc.spritesheet:
+            # Recreate animations with new scale if combined scale changed OR if sprite is missing/wrong size
+            needs_rebuild = (npc.sprite_scale != old_combined_scale or 
+                           not hasattr(npc, 'sprite') or 
+                           npc.sprite is None or
+                           (hasattr(npc, 'animation') and npc.animation and 
+                            hasattr(npc.animation, 'scale') and 
+                            npc.animation.scale != npc.sprite_scale))
+            
+            if needs_rebuild and hasattr(npc, 'spritesheet') and npc.spritesheet:
                 npc.idle_animations["down"] = npc._create_animation([0])
                 npc.idle_animations["up"] = npc._create_animation([3])
                 npc.idle_animations["right"] = npc._create_animation([6])
@@ -296,6 +319,20 @@ class MaskedScene:
                 npc.moving_animations["up"] = npc._create_animation([3, 4, 3, 5])
                 npc.moving_animations["right"] = npc._create_animation([6, 7, 6, 8])
                 npc.moving_animations["left"] = npc._create_animation_mirrored([6, 7, 6, 8])
+                # Reset current animation and sprite to the newly scaled assets
+                direction = getattr(npc, 'direction', 'down') or 'down'
+                # Prefer moving animation if NPC has velocity, else idle
+                use_moving = abs(getattr(npc, 'velocity_x', 0)) > 0.01 or abs(getattr(npc, 'velocity_y', 0)) > 0.01
+                if use_moving:
+                    npc.animation = npc.moving_animations.get(direction, npc.moving_animations.get('down'))
+                else:
+                    npc.animation = npc.idle_animations.get(direction, npc.idle_animations.get('down'))
+                if npc.animation:
+                    npc.animation.current_frame = 0
+                    npc.sprite = npc.animation.get_current_frame()
+                    # Refresh rect to the new sprite size at the current position
+                    if npc.sprite is not None:
+                        npc.rect = npc.sprite.get_rect(topleft=(npc.x, npc.y))
             
             # Add to scene if not already present
             is_new_to_scene = npc not in self.npcs
@@ -901,6 +938,39 @@ class MaskedScene:
         # Draw HUD inventory at top of screen
         self._draw_inventory_hud(surface)
         
+        # Draw game clock in top-right corner
+        if hasattr(self.game, 'game_time'):
+            # Convert game_time (minutes since midnight) to hours and minutes
+            total_minutes = int(self.game.game_time)
+            hours = total_minutes // 60
+            minutes = total_minutes % 60
+            
+            # Convert to 12-hour format with AM/PM
+            am_pm = "AM" if hours < 12 else "PM"
+            display_hours = hours if hours <= 12 else hours - 12
+            if display_hours == 0:
+                display_hours = 12
+            
+            time_text = f"{display_hours}:{minutes:02d} {am_pm}"
+            time_surface = self.font.render(time_text, True, (255, 255, 255))
+            
+            # Position in top-right corner with padding
+            time_x = WINDOW_WIDTH - time_surface.get_width() - 20
+            time_y = 10
+            
+            # Optional: Draw background for better visibility
+            bg_padding = 8
+            bg_rect = pygame.Rect(
+                time_x - bg_padding,
+                time_y - bg_padding,
+                time_surface.get_width() + bg_padding * 2,
+                time_surface.get_height() + bg_padding * 2
+            )
+            pygame.draw.rect(surface, (0, 0, 0, 180), bg_rect)
+            pygame.draw.rect(surface, (100, 100, 100), bg_rect, 2)
+            
+            surface.blit(time_surface, (time_x, time_y))
+        
         # Modal overlay
         if self.active_modal:
             overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
@@ -1076,22 +1146,6 @@ class MaskedScene:
         from world.world_registry import move_npc_to_scene
         move_npc_to_scene(getattr(npc, 'npc_id', 'unknown'), target_scene_name)
         
-        # Update NPC's actual position to the spawn point in the new scene
-        # Spawn coordinates are in feet coordinates, convert to sprite coordinates
-        # using the NPC's collision mask offset (same as in NPC.__init__)
-        if hasattr(npc, 'mask_offset_x') and hasattr(npc, 'mask_offset_y'):
-            scaled_offset_x = int(npc.mask_offset_x * npc.sprite_scale)
-            scaled_offset_y = int(npc.mask_offset_y * npc.sprite_scale)
-            npc.x = spawn[0] - scaled_offset_x
-            npc.y = spawn[1] - scaled_offset_y
-        else:
-            npc.x = spawn[0]
-            npc.y = spawn[1]
-        
-        # Update rect if it exists
-        if hasattr(npc, 'rect'):
-            npc.rect.topleft = (npc.x, npc.y)
-        
         # If the target scene is currently active, add the NPC to it immediately
         if hasattr(self.game, 'stack') and self.game.stack.top():
             active_scene = self.game.stack.top()
@@ -1105,11 +1159,71 @@ class MaskedScene:
                     npc.scene = active_scene
                     npc.mask_system = active_scene.mask_system
                     npc.props = active_scene.props
+                    # Apply scene scale, rescale sprite/animations, and speed
+                    old_combined_scale = npc.sprite_scale
+                    npc.scene_scale = getattr(active_scene, 'scene_scale', 1.0)
+                    npc.sprite_scale = npc.base_scale * npc.scene_scale
+                    base_speed = getattr(npc, 'base_speed', getattr(getattr(npc, 'config', None), 'speed', npc.speed))
+                    npc.speed = base_speed * npc.scene_scale
+                    # Update pathfinding cell size for scene scale
+                    scaled_cell_size = max(5, int(20 * npc.scene_scale))
+                    npc.pathfinder.cell = scaled_cell_size
+                    if npc.sprite_scale != old_combined_scale and hasattr(npc, 'spritesheet') and npc.spritesheet:
+                        npc.idle_animations["down"] = npc._create_animation([0])
+                        npc.idle_animations["up"] = npc._create_animation([3])
+                        npc.idle_animations["right"] = npc._create_animation([6])
+                        npc.idle_animations["left"] = npc._create_animation_mirrored([6])
+                        npc.moving_animations["down"] = npc._create_animation([0, 1, 0, 2])
+                        npc.moving_animations["up"] = npc._create_animation([3, 4, 3, 5])
+                        npc.moving_animations["right"] = npc._create_animation([6, 7, 6, 8])
+                        npc.moving_animations["left"] = npc._create_animation_mirrored([6, 7, 6, 8])
+                        direction = getattr(npc, 'direction', 'down') or 'down'
+                        use_moving = abs(getattr(npc, 'velocity_x', 0)) > 0.01 or abs(getattr(npc, 'velocity_y', 0)) > 0.01
+                        npc.animation = npc.moving_animations.get(direction, npc.moving_animations.get('down')) if use_moving else npc.idle_animations.get(direction, npc.idle_animations.get('down'))
+                        if npc.animation:
+                            npc.animation.current_frame = 0
+                            npc.sprite = npc.animation.get_current_frame()
+                            if npc.sprite is not None:
+                                npc.rect = npc.sprite.get_rect(topleft=(npc.x, npc.y))
+                    # Now that sprite_scale is updated, set position using spawn point (feet coordinates)
+                    npc._set_position_from_feet(spawn[0], spawn[1])
+                    if hasattr(npc, 'rect') and npc.sprite:
+                        npc.rect = npc.sprite.get_rect(topleft=(npc.x, npc.y))
                 else:
                     # Ensure references are up to date even if already present
                     npc.scene = active_scene
                     npc.mask_system = active_scene.mask_system
                     npc.props = active_scene.props
+                    # Apply scene scale, rescale sprite/animations, and speed
+                    old_combined_scale = npc.sprite_scale
+                    npc.scene_scale = getattr(active_scene, 'scene_scale', 1.0)
+                    npc.sprite_scale = npc.base_scale * npc.scene_scale
+                    base_speed = getattr(npc, 'base_speed', getattr(getattr(npc, 'config', None), 'speed', npc.speed))
+                    npc.speed = base_speed * npc.scene_scale
+                    # Update pathfinding cell size for scene scale
+                    scaled_cell_size = max(5, int(20 * npc.scene_scale))
+                    npc.pathfinder.cell = scaled_cell_size
+                    if npc.sprite_scale != old_combined_scale and hasattr(npc, 'spritesheet') and npc.spritesheet:
+                        npc.idle_animations["down"] = npc._create_animation([0])
+                        npc.idle_animations["up"] = npc._create_animation([3])
+                        npc.idle_animations["right"] = npc._create_animation([6])
+                        npc.idle_animations["left"] = npc._create_animation_mirrored([6])
+                        npc.moving_animations["down"] = npc._create_animation([0, 1, 0, 2])
+                        npc.moving_animations["up"] = npc._create_animation([3, 4, 3, 5])
+                        npc.moving_animations["right"] = npc._create_animation([6, 7, 6, 8])
+                        npc.moving_animations["left"] = npc._create_animation_mirrored([6, 7, 6, 8])
+                        direction = getattr(npc, 'direction', 'down') or 'down'
+                        use_moving = abs(getattr(npc, 'velocity_x', 0)) > 0.01 or abs(getattr(npc, 'velocity_y', 0)) > 0.01
+                        npc.animation = npc.moving_animations.get(direction, npc.moving_animations.get('down')) if use_moving else npc.idle_animations.get(direction, npc.idle_animations.get('down'))
+                        if npc.animation:
+                            npc.animation.current_frame = 0
+                            npc.sprite = npc.animation.get_current_frame()
+                            if npc.sprite is not None:
+                                npc.rect = npc.sprite.get_rect(topleft=(npc.x, npc.y))
+                    # Now that sprite_scale is updated, set position using spawn point (feet coordinates)
+                    npc._set_position_from_feet(spawn[0], spawn[1])
+                    if hasattr(npc, 'rect') and npc.sprite:
+                        npc.rect = npc.sprite.get_rect(topleft=(npc.x, npc.y))
                     
                     # Verify spawn point is walkable; if not, find nearby walkable spot
                     if npc.mask_system:

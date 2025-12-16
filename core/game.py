@@ -26,6 +26,14 @@ class Game:
         # Initialize a fresh run state (player/world/collections)
         self.reset_run_state()
         
+        # Game clock: 8am to 10pm (14 hours = 840 minutes) in 15 real minutes
+        # Time advances in 15-minute game increments (56 total increments)
+        # Time per increment: 15 real minutes / 56 increments ≈ 16.07 seconds
+        self.game_time = 8 * 60  # Start at 8:00 AM (in game minutes since midnight)
+        self.game_time_increment = 15  # Jump 15 game minutes per update
+        self.time_until_next_increment = 900 / 56  # ~16.07 seconds until next increment
+        self.time_accumulator = 0.0  # Accumulate real time
+        
         # Precache all scene masks for off-screen NPC wandering
         from world.mask_cache import precache_all_masks
         precache_all_masks(self)
@@ -55,6 +63,15 @@ class Game:
             top = self.stack.top()
             if top:
                 top.update(dt)
+
+            # Update game clock (advance time in 15-minute increments)
+            self.time_accumulator += dt
+            if self.time_accumulator >= self.time_until_next_increment:
+                self.game_time += self.game_time_increment
+                self.time_accumulator = 0.0
+                # Clamp to 8am-10pm range, reset at 10pm
+                if self.game_time >= 22 * 60:  # 10pm or beyond
+                    self.game_time = 8 * 60  # Reset to 8am
 
             # Update NPCs globally so they continue advancing state across scenes
             from world.world_registry import update_all_npcs

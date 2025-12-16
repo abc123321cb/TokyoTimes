@@ -8,8 +8,8 @@ from scenes.scene_registry import register_scene
 # To find portal IDs, run the game with debug enabled and check console output
 PORTAL_MAP = {
     0: {
-        "to_scene": "cat_cafe_kitchen",
-        "spawn": (1085, 490),
+        "to_scene": "outdoor",
+        "spawn": (107, 512),
     },
     1: {
         "to_scene": "cat_cafe_kitchen",

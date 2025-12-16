@@ -103,12 +103,16 @@ class NPC(Character):
         # NPC Configuration (use provided or default to Henry's config)
         self.config = config if config is not None else HENRY_CONFIG
         self.npc_type = "henry"  # Type identifier for scene tracking
+        # Base speed from config; scaled per-scene later
+        self.base_speed = getattr(self.config, "speed", 0.0)
+        self.speed = self.base_speed * self.scene_scale
         
-        # Pathfinding
-        self.pathfinder = Pathfinding(cell_size=20)
+        # Pathfinding - scale cell size with scene scale for finer grids in scaled scenes
+        scaled_cell_size = max(5, int(20 * self.scene_scale))  # Min 5px, scales with scene
+        self.pathfinder = Pathfinding(cell_size=scaled_cell_size)
         self.path = []  # Current path waypoints (list of (x, y) tuples)
         self.current_waypoint_idx = 0
-        self.speed = self.config.speed  # Get speed from config
+        # self.speed already set using base_speed and scene_scale
         self.mask_system = None  # Will be set by scene
         self.destination = None  # Target destination (x, y) for re-pathfinding
         self.stuck_timer = 0.0  # Time spent not making progress
@@ -189,6 +193,9 @@ class NPC(Character):
             self.y = feet_y - self.sprite.get_height()
 
     def update(self, dt: float) -> None:
+        # Ensure speed stays in sync with scene scaling
+        self.speed = self.base_speed * self.scene_scale
+
         # Skip update if transitioning between scenes
         if getattr(self, 'transitioning', False):
             return
@@ -231,7 +238,9 @@ class NPC(Character):
             distance_moved = math.sqrt((current_pos[0] - self.last_position[0])**2 + 
                                      (current_pos[1] - self.last_position[1])**2)
             
-            if distance_moved < 1.0:  # Less than 1 pixel moved
+            # Scale stuck threshold with scene scale (smaller NPCs need smaller thresholds)
+            stuck_threshold = max(0.5, 1.0 * self.scene_scale)
+            if distance_moved < stuck_threshold:
                 self.stuck_timer += dt
                 if self.stuck_timer > 0.5:  # Stuck for more than 0.5 seconds
                     print(f"  NPC stuck, re-pathfinding to {self.destination}")

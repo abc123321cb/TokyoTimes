@@ -88,7 +88,8 @@ class Player(Character):
                 sprite.fill((100, 200, 250))
         
         super().__init__(x, y, sprite)
-        self.speed = speed
+        self.base_speed = speed  # Store base speed for scene scaling
+        self.speed = self.base_speed * self.scene_scale  # Apply scene scale to speed
         self.last_direction = "down"
     
     def _get_frame_collision_box(self) -> pygame.Rect:

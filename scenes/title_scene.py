@@ -5,6 +5,8 @@ from core.scene import Scene
 # Import scenes to register them
 from scenes.cat_cafe_scene import CatCafeScene
 from scenes.cat_cafe_kitchen_scene import CatCafeKitchenScene
+from scenes.arcade_scene import ArcadeScene
+from scenes.outdoor_scene import OutdoorScene
 from scenes.load_game_scene import LoadGameScene
 
 class TitleScene:
